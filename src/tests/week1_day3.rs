@@ -122,7 +122,6 @@ fn test_block_seek_key() {
     let mut iter = BlockIterator::create_and_seek_to_key(block, key_of(0).as_key_slice());
     for offset in 1..=5 {
         for i in 0..num_of_keys() {
-            println!("1");
             let key = iter.key();
             let value = iter.value();
             assert_eq!(

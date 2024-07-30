@@ -88,16 +88,38 @@ impl BlockIterator {
     /// Note: You should assume the key-value pairs in the block are sorted when being added by
     /// callers.
     pub fn seek_to_key(&mut self, key: KeySlice) {
-        self.seek_to_first();
-        while self.is_valid() && self.key().cmp(&key) == Ordering::Less {
+        if self.block.offsets.is_empty() {
+            return;
+        }
+
+        let mut start_index = 0;
+        let mut end_index = self.block.offsets.len() - 1;
+        while start_index <= end_index {
+            self.seek_to_index((start_index + end_index) / 2);
+            match self.key().cmp(&key) {
+                Ordering::Equal => break,
+                Ordering::Less => start_index = self.idx + 1,
+                Ordering::Greater => {
+                    if self.idx == 0 {
+                        break;
+                    }
+                    end_index = self.idx - 1;
+                }
+            }
+        }
+        self.idx += 1;
+        if self.key().cmp(&key) == Ordering::Less {
             self.next();
         }
     }
 
     fn seek_to_index(&mut self, index: usize) {
         let start_index = self.block.offsets[index] as usize;
-        let end_index = self.block.offsets
-            .get(index + 1).copied()
+        let end_index = self
+            .block
+            .offsets
+            .get(index + 1)
+            .copied()
             .map(|end| end as usize)
             .unwrap_or_else(|| self.block.data.len());
         let (key_len, val_len) = {

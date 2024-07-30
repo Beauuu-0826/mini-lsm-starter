@@ -113,7 +113,8 @@ impl MemTable {
             map: Arc::clone(&self.map),
             iter_builder: |map| map.range((map_bound(_lower), map_bound(_upper))),
             item: (Bytes::new(), Bytes::new()),
-        }.build();
+        }
+        .build();
         iterator.next().unwrap();
         iterator
     }

@@ -14,9 +14,8 @@ use anyhow::{bail, Error, Result};
 pub use builder::SsTableBuilder;
 use bytes::{Buf, BufMut};
 pub use iterator::SsTableIterator;
-use nom::Err;
 
-use crate::block::{self, Block};
+use crate::block::Block;
 use crate::key::{KeyBytes, KeySlice};
 use crate::lsm_storage::BlockCache;
 

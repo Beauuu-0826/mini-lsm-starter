@@ -32,7 +32,7 @@ impl BlockBuilder {
     pub fn add(&mut self, key: KeySlice, value: &[u8]) -> bool {
         if self.is_empty() {
             self.append_data(key, value);
-            self.first_key.append(&key.raw_ref());
+            self.first_key.append(key.raw_ref());
             return true;
         }
         let approximate_block_size =

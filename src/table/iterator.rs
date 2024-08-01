@@ -56,12 +56,6 @@ impl SsTableIterator {
             self.blk_idx = self.table.find_block_idx(key);
             self.blk_iter = BlockIterator::create_and_seek_to_key(block, key);
         }
-
-        if !self.blk_iter.is_valid() && self.blk_idx + 1 < self.table.block_meta.len() {
-            self.blk_idx += 1;
-            let block = self.table.read_block(self.blk_idx)?;
-            self.blk_iter = BlockIterator::create_and_seek_to_key(block, key);
-        }
         Ok(())
     }
 }
@@ -89,8 +83,8 @@ impl StorageIterator for SsTableIterator {
     fn next(&mut self) -> Result<()> {
         self.blk_iter.next();
         while !self.blk_iter.is_valid() && self.blk_idx < self.table.block_meta.len() - 1 {
-            let block = self.table.read_block(self.blk_idx + 1)?;
             self.blk_idx += 1;
+            let block = self.table.read_block(self.blk_idx)?;
             self.blk_iter = BlockIterator::create_and_seek_to_first(block);
         }
         Ok(())

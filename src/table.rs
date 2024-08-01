@@ -1,6 +1,3 @@
-#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
-#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
-
 pub(crate) mod bloom;
 mod builder;
 mod iterator;
@@ -190,7 +187,7 @@ impl SsTable {
             .unwrap()
             .try_get_with((self.id, block_idx), || self.read_block(block_idx))
         {
-            Err(error) => Err(Error::msg("Read block from file error")),
+            Err(_) => Err(Error::msg("Read block from file error")),
             Ok(result) => Ok(result),
         }
     }
@@ -201,7 +198,6 @@ impl SsTable {
     pub fn find_block_idx(&self, key: KeySlice) -> usize {
         let mut start_index = 0;
         let mut end_index = self.block_meta.len() - 1;
-
         let mut idx_key = (0, KeySlice::from_slice(b""));
         while start_index <= end_index {
             idx_key = {
@@ -220,13 +216,23 @@ impl SsTable {
             }
         }
 
-        if key.cmp(&idx_key.1) == Ordering::Less
-            && idx_key.0 != 0
-            && key.cmp(&self.block_meta[idx_key.0 - 1].last_key.as_key_slice()) != Ordering::Greater
-        {
-            idx_key.0 -= 1;
+        match key.cmp(&idx_key.1) {
+            Ordering::Greater
+                if key.cmp(&self.block_meta[idx_key.0].last_key.as_key_slice())
+                    == Ordering::Greater
+                    && idx_key.0 < self.block_meta.len() - 1 =>
+            {
+                idx_key.0 + 1
+            }
+            Ordering::Less
+                if idx_key.0 != 0
+                    && key.cmp(&self.block_meta[idx_key.0 - 1].last_key.as_key_slice())
+                        != Ordering::Greater =>
+            {
+                idx_key.0 - 1
+            }
+            _ => idx_key.0,
         }
-        idx_key.0
     }
 
     /// Get number of data blocks.

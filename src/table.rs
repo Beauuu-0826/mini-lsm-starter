@@ -4,12 +4,13 @@ mod iterator;
 
 use std::cmp::Ordering;
 use std::fs::File;
+use std::ops::RangeBounds;
 use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{bail, Error, Result};
 pub use builder::SsTableBuilder;
-use bytes::{Buf, BufMut};
+use bytes::{Buf, BufMut, Bytes};
 pub use iterator::SsTableIterator;
 
 use crate::block::Block;
@@ -258,5 +259,17 @@ impl SsTable {
 
     pub fn max_ts(&self) -> u64 {
         self.max_ts
+    }
+
+    pub fn key_within(&self, _key: KeyBytes) -> bool {
+        self.first_key.cmp(&_key) != Ordering::Greater && self.last_key.cmp(&_key) != Ordering::Less
+    }
+
+    pub fn range_overlap<R>(&self, range: R) -> bool
+    where
+        R: RangeBounds<Bytes>,
+    {
+        range.contains(&Bytes::copy_from_slice(self.first_key.raw_ref()))
+            || range.contains(&Bytes::copy_from_slice(self.last_key.raw_ref()))
     }
 }

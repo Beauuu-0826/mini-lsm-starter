@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use bytes::Bytes;
+use farmhash::fingerprint32;
 use parking_lot::{Mutex, MutexGuard, RwLock};
 
 use crate::block::Block;
@@ -314,6 +315,11 @@ impl LsmStorageInner {
         for id in state.l0_sstables.iter() {
             let sst = state.sstables.get(id).unwrap();
             if sst.key_within(KeyBytes::from_bytes(Bytes::copy_from_slice(_key))) {
+                if sst.bloom.is_some()
+                    && !sst.bloom.as_ref().unwrap().may_contain(fingerprint32(_key))
+                {
+                    continue;
+                }
                 sst_iters.push(Box::new(SsTableIterator::create_and_seek_to_key(
                     Arc::clone(sst),
                     KeySlice::from_slice(_key),

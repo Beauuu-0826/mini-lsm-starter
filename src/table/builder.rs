@@ -4,7 +4,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use bytes::BufMut;
 
-use super::{BlockMeta, FileObject, SsTable};
+use super::{bloom::Bloom, BlockMeta, FileObject, SsTable};
 use crate::{
     block::BlockBuilder,
     key::{KeySlice, KeyVec},
@@ -19,6 +19,7 @@ pub struct SsTableBuilder {
     data: Vec<u8>,
     pub(crate) meta: Vec<BlockMeta>,
     block_size: usize,
+    key_hashs: Vec<u32>,
 }
 
 impl SsTableBuilder {
@@ -31,6 +32,7 @@ impl SsTableBuilder {
             data: Vec::new(),
             meta: Vec::new(),
             block_size,
+            key_hashs: Vec::new(),
         }
     }
 
@@ -39,6 +41,7 @@ impl SsTableBuilder {
     /// Note: You should split a new block when the current block is full.(`std::mem::replace` may
     /// be helpful here)
     pub fn add(&mut self, key: KeySlice, value: &[u8]) {
+        self.key_hashs.push(farmhash::fingerprint32(key.raw_ref()));
         if self.first_key.is_empty() {
             self.first_key.put(key.raw_ref());
         }
@@ -90,6 +93,14 @@ impl SsTableBuilder {
         encoded.put(&data[..]);
         BlockMeta::encode_block_meta(&meta[..], &mut encoded);
         encoded.put_u32(data.len() as u32);
+
+        let bloom_filter = Bloom::build_from_key_hashes(
+            &self.key_hashs,
+            Bloom::bloom_bits_per_key(self.key_hashs.len(), 0.01),
+        );
+        let bloom_filter_offset = encoded.len();
+        bloom_filter.encode(&mut encoded);
+        encoded.put_u32(bloom_filter_offset as u32);
         Ok(SsTable {
             file: FileObject::create(path.as_ref(), encoded)?,
             block_meta: meta,
@@ -98,7 +109,7 @@ impl SsTableBuilder {
             block_cache,
             first_key: KeyVec::from_vec(self.first_key).into_key_bytes(),
             last_key: KeyVec::from_vec(self.last_key).into_key_bytes(),
-            bloom: None,
+            bloom: Some(bloom_filter),
             max_ts: 0,
         })
     }

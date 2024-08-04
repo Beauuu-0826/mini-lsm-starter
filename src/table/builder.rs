@@ -52,11 +52,13 @@ impl SsTableBuilder {
             return;
         }
         let builder = std::mem::replace(&mut self.builder, BlockBuilder::new(self.block_size));
+        let first_key = builder.first_key();
+        let last_key = builder.last_key();
         let block = Arc::new(builder.build());
         self.meta.push(BlockMeta {
             offset: self.data.len(),
-            first_key: block.key_at_index(0),
-            last_key: block.key_at_index(block.offsets.len() - 1),
+            first_key,
+            last_key,
         });
         self.data.put(block.encode());
         let _ = self.builder.add(key, value);
@@ -80,11 +82,13 @@ impl SsTableBuilder {
         let mut data = self.data;
         let mut meta = self.meta;
         if !self.builder.is_empty() {
+            let first_key = self.builder.first_key();
+            let last_key = self.builder.last_key();
             let block = Arc::new(self.builder.build());
             meta.push(BlockMeta {
                 offset: data.len(),
-                first_key: block.key_at_index(0),
-                last_key: block.key_at_index(block.offsets.len() - 1),
+                first_key,
+                last_key,
             });
             data.put(block.encode());
         }

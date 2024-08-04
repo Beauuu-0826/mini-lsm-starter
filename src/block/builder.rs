@@ -1,6 +1,6 @@
-use bytes::BufMut;
+use bytes::{BufMut, Bytes};
 
-use crate::key::{KeySlice, KeyVec};
+use crate::key::{KeyBytes, KeySlice, KeyVec};
 
 use super::Block;
 
@@ -14,6 +14,8 @@ pub struct BlockBuilder {
     block_size: usize,
     /// The first key in the block
     first_key: KeyVec,
+    /// The last key in the block
+    last_key: KeyVec,
 }
 
 impl BlockBuilder {
@@ -24,6 +26,7 @@ impl BlockBuilder {
             data: Vec::new(),
             block_size,
             first_key: KeyVec::default(),
+            last_key: KeyVec::default(),
         }
     }
 
@@ -31,8 +34,9 @@ impl BlockBuilder {
     #[must_use]
     pub fn add(&mut self, key: KeySlice, value: &[u8]) -> bool {
         if self.is_empty() {
-            self.append_data(key, value);
             self.first_key.append(key.raw_ref());
+            self.last_key.set_from_slice(key);
+            self.append_data(key, value);
             return true;
         }
         let approximate_block_size =
@@ -40,6 +44,7 @@ impl BlockBuilder {
         if approximate_block_size.gt(&self.block_size) {
             return false;
         }
+        self.last_key.set_from_slice(key);
         self.append_data(key, value);
         true
     }
@@ -63,5 +68,13 @@ impl BlockBuilder {
             data: self.data,
             offsets: self.offsets,
         }
+    }
+
+    pub fn first_key(&self) -> KeyBytes {
+        KeyBytes::from_bytes(Bytes::copy_from_slice(self.first_key.raw_ref()))
+    }
+
+    pub fn last_key(&self) -> KeyBytes {
+        KeyBytes::from_bytes(Bytes::copy_from_slice(self.last_key.raw_ref()))
     }
 }

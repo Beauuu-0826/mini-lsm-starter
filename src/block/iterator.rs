@@ -1,6 +1,3 @@
-#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
-#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
-
 use std::{cmp::Ordering, sync::Arc};
 
 use bytes::Buf;
@@ -25,13 +22,17 @@ pub struct BlockIterator {
 
 impl BlockIterator {
     fn new(block: Arc<Block>) -> Self {
-        Self {
+        let mut iter = Self {
             block,
             key: KeyVec::new(),
             value_range: (0, 0),
             idx: 0,
             first_key: KeyVec::new(),
-        }
+        };
+        let first_key_len = (&iter.block.data[2..4]).get_u16() as usize;
+        iter.first_key
+            .append(&iter.block.data[4..4 + first_key_len]);
+        iter
     }
 
     /// Creates a block iterator and seek to the first entry.
@@ -71,7 +72,6 @@ impl BlockIterator {
         }
         self.seek_to_index(0);
         self.idx += 1;
-        self.first_key.set_from_slice(self.key.as_key_slice())
     }
 
     /// Move to the next key in the block.
@@ -122,15 +122,18 @@ impl BlockIterator {
             .copied()
             .map(|end| end as usize)
             .unwrap_or_else(|| self.block.data.len());
-        let (key_len, val_len) = {
-            let key_len = (&self.block.data[start_index..start_index + 2]).get_u16() as usize;
-            let val_len = (&self.block.data[start_index + 2 + key_len..start_index + 4 + key_len])
+        let (overlap_len, rest_len, val_len) = {
+            let overlap_len = (&self.block.data[start_index..start_index + 2]).get_u16() as usize;
+            let rest_len = (&self.block.data[start_index + 2..start_index + 4]).get_u16() as usize;
+            let val_len = (&self.block.data[start_index + 4 + rest_len..start_index + 6 + rest_len])
                 .get_u16() as usize;
-            (key_len, val_len)
+            (overlap_len, rest_len, val_len)
         };
         self.key.set_from_slice(KeySlice::from_slice(
-            &self.block.data[start_index + 2..start_index + 2 + key_len],
+            &self.first_key.raw_ref()[0..overlap_len],
         ));
+        self.key
+            .append(&self.block.data[start_index + 4..start_index + 4 + rest_len]);
         self.value_range = (end_index - val_len, end_index);
         self.idx = index;
     }

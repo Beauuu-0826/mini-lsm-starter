@@ -1,3 +1,5 @@
+use std::cmp::min;
+
 use bytes::{BufMut, Bytes};
 
 use crate::key::{KeyBytes, KeySlice, KeyVec};
@@ -18,6 +20,16 @@ pub struct BlockBuilder {
     last_key: KeyVec,
 }
 
+fn overlap_len(one: &[u8], another: &[u8]) -> usize {
+    let check_len = min(one.len(), another.len());
+    for i in 0..check_len {
+        if one[i] != another[i] {
+            return i;
+        }
+    }
+    check_len
+}
+
 impl BlockBuilder {
     /// Creates a new block builder.
     pub fn new(block_size: usize) -> Self {
@@ -33,28 +45,28 @@ impl BlockBuilder {
     /// Adds a key-value pair to the block. Returns false when the block is full.
     #[must_use]
     pub fn add(&mut self, key: KeySlice, value: &[u8]) -> bool {
-        if self.is_empty() {
-            self.first_key.append(key.raw_ref());
-            self.last_key.set_from_slice(key);
-            self.append_data(key, value);
-            return true;
-        }
-        let approximate_block_size =
-            self.data.len() + self.offsets.len() * 2 + key.len() + value.len() + 8;
-        if approximate_block_size.gt(&self.block_size) {
+        let approximate_block_size = self.data.len()
+            + self.offsets.len() * 2
+            + 2
+            + (key.len() - overlap_len(key.raw_ref(), self.first_key.raw_ref()))
+            + value.len()
+            + 10;
+        if approximate_block_size.gt(&self.block_size) && !self.is_empty() {
             return false;
         }
-        self.last_key.set_from_slice(key);
-        self.append_data(key, value);
-        true
-    }
 
-    fn append_data(&mut self, key: KeySlice, value: &[u8]) {
         self.offsets.push(self.data.len() as u16);
-        self.data.put_u16(key.len() as u16);
-        self.data.put(key.raw_ref());
+        let overlap_len = overlap_len(self.first_key.raw_ref(), key.raw_ref());
+        self.data.put_u16(overlap_len as u16);
+        self.data.put_u16((key.len() - overlap_len) as u16);
+        self.data.put(&key.raw_ref()[overlap_len..]);
         self.data.put_u16(value.len() as u16);
         self.data.put(value);
+        if self.first_key.is_empty() {
+            self.first_key.append(key.raw_ref());
+        }
+        self.last_key.set_from_slice(key);
+        true
     }
 
     /// Check if there is no key-value pair in the block.

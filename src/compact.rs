@@ -183,14 +183,7 @@ impl LsmStorageInner {
         let (l0_sstables, l1_sstables) = {
             let guard = self.state.read();
             let l0_sstables: Vec<usize> = guard.l0_sstables.iter().map(|id| *id).collect();
-            let l1_sstables: Vec<usize> = guard
-                .levels
-                .get(0)
-                .unwrap()
-                .1
-                .iter()
-                .map(|id| *id)
-                .collect();
+            let l1_sstables: Vec<usize> = guard.levels[0].1.iter().map(|id| *id).collect();
             (l0_sstables, l1_sstables)
         };
         let sorted_run = self.compact(&CompactionTask::ForceFullCompaction {
@@ -204,9 +197,7 @@ impl LsmStorageInner {
             for sst_id in l0_sstables.iter().chain(l1_sstables.iter()) {
                 state.sstables.remove(sst_id);
             }
-            state
-                .l0_sstables
-                .truncate(state.l0_sstables.len() - l0_sstables.len());
+            state.l0_sstables.truncate(state.l0_sstables.len() - l0_sstables.len());
             state.levels.get_mut(0).unwrap().1.clear();
             for sst in sorted_run {
                 let sst_id = sst.sst_id();

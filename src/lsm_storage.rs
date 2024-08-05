@@ -19,7 +19,7 @@ use crate::compact::{
     CompactionController, CompactionOptions, LeveledCompactionController, LeveledCompactionOptions,
     SimpleLeveledCompactionController, SimpleLeveledCompactionOptions, TieredCompactionController,
 };
-use crate::iterators::concat_iterator::{self, SstConcatIterator};
+use crate::iterators::concat_iterator::SstConcatIterator;
 use crate::iterators::merge_iterator::MergeIterator;
 use crate::iterators::two_merge_iterator::TwoMergeIterator;
 use crate::iterators::StorageIterator;
@@ -291,6 +291,7 @@ impl LsmStorageInner {
     }
 
     /// Get a key from the storage. In day 7, this can be further optimized by using a bloom filter.
+    /// Memtable -> Immutable Memtable -> L0 SsTable -> L1 SsTable
     pub fn get(&self, _key: &[u8]) -> Result<Option<Bytes>> {
         let state = {
             let gaurd = self.state.read();
@@ -317,9 +318,7 @@ impl LsmStorageInner {
         for id in state.l0_sstables.iter() {
             let sst = state.sstables.get(id).unwrap();
             if sst.key_within(KeyBytes::from_bytes(Bytes::copy_from_slice(_key))) {
-                if sst.bloom.is_some()
-                    && !sst.bloom.as_ref().unwrap().may_contain(fingerprint32(_key))
-                {
+                if sst.bloom.is_some() && !sst.bloom.as_ref().unwrap().may_contain(fingerprint32(_key)) {
                     continue;
                 }
                 sst_iters.push(Box::new(SsTableIterator::create_and_seek_to_key(
@@ -328,7 +327,6 @@ impl LsmStorageInner {
                 )?));
             }
         }
-
         let mut l1_sst = Vec::with_capacity(state.levels[0].1.len());
         for id in state.levels[0].1.iter() {
             l1_sst.push(Arc::clone(state.sstables.get(id).unwrap()));
@@ -456,7 +454,6 @@ impl LsmStorageInner {
             let guard = self.state.read();
             Arc::clone(&guard)
         };
-
         // Memtable iterators
         let mut iters = Vec::with_capacity(state.imm_memtables.len() + 1);
         iters.push(Box::new(state.memtable.scan(_lower, _upper)));
@@ -464,7 +461,6 @@ impl LsmStorageInner {
             .imm_memtables
             .iter()
             .for_each(|imm| iters.push(Box::new(imm.scan(_lower, _upper))));
-
         // l0 sst iterators
         let mut sst_iters = Vec::with_capacity(state.l0_sstables.len());
         for id in state.l0_sstables.iter() {
@@ -475,13 +471,12 @@ impl LsmStorageInner {
                 )?));
             }
         }
-
         // l1 sst
         let mut l1_sst = Vec::with_capacity(state.levels[0].1.len());
         for id in state.levels[0].1.iter() {
             l1_sst.push(Arc::clone(state.sstables.get(id).unwrap()));
         }
-
+        
         let mut lsm_iterator = LsmIterator::new(
             TwoMergeIterator::create(
                 MergeIterator::create(iters),

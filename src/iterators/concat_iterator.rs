@@ -1,11 +1,10 @@
 use std::{cmp::Ordering, sync::Arc};
 
 use anyhow::Result;
-use bytes::Bytes;
 
 use super::StorageIterator;
 use crate::{
-    key::{KeyBytes, KeySlice},
+    key::KeySlice,
     table::{SsTable, SsTableIterator},
 };
 
@@ -20,11 +19,7 @@ pub struct SstConcatIterator {
 impl SstConcatIterator {
     pub fn create_and_seek_to_first(sstables: Vec<Arc<SsTable>>) -> Result<Self> {
         if sstables.is_empty() {
-            return Ok(Self {
-                current: None,
-                next_sst_idx: 0,
-                sstables,
-            });
+            return Ok(Self { current: None, next_sst_idx: 0, sstables });
         }
         let current =
             SsTableIterator::create_and_seek_to_first(Arc::clone(sstables.get(0).unwrap()))?;
@@ -38,21 +33,13 @@ impl SstConcatIterator {
     pub fn create_and_seek_to_key(sstables: Vec<Arc<SsTable>>, key: KeySlice) -> Result<Self> {
         let mut pick = sstables.len();
         for (idx, sst) in sstables.iter().enumerate() {
-            if sst
-                .last_key()
-                .cmp(&KeyBytes::from_bytes(Bytes::copy_from_slice(key.raw_ref())))
-                != Ordering::Less
-            {
+            if sst.last_key().raw_ref().cmp(key.raw_ref()) != Ordering::Less {
                 pick = idx;
                 break;
             }
         }
         if pick == sstables.len() {
-            return Ok(Self {
-                current: None,
-                next_sst_idx: pick,
-                sstables,
-            });
+            return Ok(Self { current: None, next_sst_idx: pick, sstables });
         }
         let current =
             SsTableIterator::create_and_seek_to_key(Arc::clone(sstables.get(pick).unwrap()), key)?;
@@ -84,10 +71,9 @@ impl StorageIterator for SstConcatIterator {
             return Ok(());
         }
         self.current.as_mut().unwrap().next()?;
-        if !self.current.as_ref().unwrap().is_valid() && self.next_sst_idx < self.sstables.len() - 1
-        {
+        if !self.current.as_ref().unwrap().is_valid() && self.next_sst_idx < self.sstables.len() - 1 {
             self.current = Some(SsTableIterator::create_and_seek_to_first(Arc::clone(
-                self.sstables.get(self.next_sst_idx).unwrap(),
+                &self.sstables[self.next_sst_idx],
             ))?);
             self.next_sst_idx += 1;
         }

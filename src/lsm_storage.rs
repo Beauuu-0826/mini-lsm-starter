@@ -1,6 +1,7 @@
 #![allow(dead_code)] // REMOVE THIS LINE after fully implementing this functionality
 
 use std::borrow::BorrowMut;
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fs;
 use std::ops::Bound;
@@ -18,6 +19,7 @@ use crate::compact::{
     CompactionController, CompactionOptions, LeveledCompactionController, LeveledCompactionOptions,
     SimpleLeveledCompactionController, SimpleLeveledCompactionOptions, TieredCompactionController,
 };
+use crate::iterators::concat_iterator::{self, SstConcatIterator};
 use crate::iterators::merge_iterator::MergeIterator;
 use crate::iterators::two_merge_iterator::TwoMergeIterator;
 use crate::iterators::StorageIterator;
@@ -326,12 +328,17 @@ impl LsmStorageInner {
                 )?));
             }
         }
-        let merge_iterator = MergeIterator::create(sst_iters);
-        if merge_iterator.is_valid()
-            && merge_iterator.key().raw_ref() == _key
-            && !merge_iterator.value().is_empty()
-        {
-            return Ok(Some(Bytes::copy_from_slice(merge_iterator.value())));
+
+        let mut l1_sst = Vec::with_capacity(state.levels[0].1.len());
+        for id in state.levels[0].1.iter() {
+            l1_sst.push(Arc::clone(state.sstables.get(id).unwrap()));
+        }
+        let iterator = TwoMergeIterator::create(
+            MergeIterator::create(sst_iters),
+            SstConcatIterator::create_and_seek_to_key(l1_sst, KeySlice::from_slice(_key))?,
+        )?;
+        if iterator.is_valid() && iterator.key().raw_ref() == _key && !iterator.value().is_empty() {
+            return Ok(Some(Bytes::copy_from_slice(iterator.value())));
         }
         Ok(None)
     }
@@ -449,6 +456,8 @@ impl LsmStorageInner {
             let guard = self.state.read();
             Arc::clone(&guard)
         };
+
+        // Memtable iterators
         let mut iters = Vec::with_capacity(state.imm_memtables.len() + 1);
         iters.push(Box::new(state.memtable.scan(_lower, _upper)));
         state
@@ -456,24 +465,48 @@ impl LsmStorageInner {
             .iter()
             .for_each(|imm| iters.push(Box::new(imm.scan(_lower, _upper))));
 
+        // l0 sst iterators
         let mut sst_iters = Vec::with_capacity(state.l0_sstables.len());
         for id in state.l0_sstables.iter() {
             let sst = state.sstables.get(id).unwrap();
             if sst.range_overlap((map_bound(_lower), map_bound(_upper))) {
-                sst_iters.push(Box::new(SsTableIterator::create_with_bound(
+                sst_iters.push(Box::new(SsTableIterator::create_and_seek_to_first(
                     Arc::clone(sst),
-                    _lower,
                 )?));
             }
         }
 
-        let lsm_iterator = LsmIterator::new(
+        // l1 sst
+        let mut l1_sst = Vec::with_capacity(state.levels[0].1.len());
+        for id in state.levels[0].1.iter() {
+            l1_sst.push(Arc::clone(state.sstables.get(id).unwrap()));
+        }
+
+        let mut lsm_iterator = LsmIterator::new(
             TwoMergeIterator::create(
                 MergeIterator::create(iters),
-                MergeIterator::create(sst_iters),
+                TwoMergeIterator::create(
+                    MergeIterator::create(sst_iters),
+                    SstConcatIterator::create_and_seek_to_first(l1_sst)?,
+                )?,
             )?,
             map_bound(_upper),
         )?;
+        // consume the lsm iterator to meet the lower bound
+        match _lower {
+            Bound::Unbounded => (),
+            Bound::Included(key) => {
+                while lsm_iterator.is_valid() && lsm_iterator.key().cmp(key) == Ordering::Less {
+                    lsm_iterator.next()?;
+                }
+            }
+            Bound::Excluded(key) => {
+                while lsm_iterator.is_valid() && lsm_iterator.key().cmp(key) != Ordering::Greater {
+                    lsm_iterator.next()?;
+                }
+            }
+        }
+
         Ok(FusedIterator::new(lsm_iterator))
     }
 }

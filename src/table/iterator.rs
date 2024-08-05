@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, ops::Bound, sync::Arc};
+use std::sync::Arc;
 
 use anyhow::Result;
 
@@ -13,25 +13,6 @@ pub struct SsTableIterator {
 }
 
 impl SsTableIterator {
-    /// Create a new iterator with a lower bound
-    pub fn create_with_bound(table: Arc<SsTable>, _lower: Bound<&[u8]>) -> Result<Self> {
-        match _lower {
-            Bound::Unbounded => Self::create_and_seek_to_first(table),
-            Bound::Included(key) => Self::create_and_seek_to_key(table, KeySlice::from_slice(key)),
-            Bound::Excluded(key) => {
-                match Self::create_and_seek_to_key(table, KeySlice::from_slice(key)) {
-                    Err(error) => Err(error),
-                    Ok(mut iterator) => {
-                        if iterator.key().cmp(&KeySlice::from_slice(key)) == Ordering::Equal {
-                            let _ = iterator.next();
-                        }
-                        Ok(iterator)
-                    }
-                }
-            }
-        }
-    }
-
     /// Create a new iterator and seek to the first key-value pair in the first data block.
     pub fn create_and_seek_to_first(table: Arc<SsTable>) -> Result<Self> {
         let block = table.read_block(0)?;
@@ -56,12 +37,9 @@ impl SsTableIterator {
 
     /// Create a new iterator and seek to the first key-value pair which >= `key`.
     pub fn create_and_seek_to_key(table: Arc<SsTable>, key: KeySlice) -> Result<Self> {
-        let block = table.read_block(0)?;
-        Ok(Self {
-            table,
-            blk_idx: 0,
-            blk_iter: BlockIterator::create_and_seek_to_key(block, key),
-        })
+        let mut iter = Self::create_and_seek_to_first(table)?;
+        iter.seek_to_key(key)?;
+        Ok(iter)
     }
 
     /// Seek to the first key-value pair which >= `key`.

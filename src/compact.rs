@@ -16,12 +16,11 @@ pub use simple_leveled::{
 };
 pub use tiered::{TieredCompactionController, TieredCompactionOptions, TieredCompactionTask};
 
-use crate::iterators::concat_iterator::SstConcatIterator;
-use crate::iterators::merge_iterator::MergeIterator;
 use crate::iterators::two_merge_iterator::TwoMergeIterator;
 use crate::iterators::StorageIterator;
+use crate::key::KeySlice;
 use crate::lsm_storage::{LsmStorageInner, LsmStorageState};
-use crate::table::{SsTable, SsTableBuilder, SsTableIterator};
+use crate::table::{SsTable, SsTableBuilder};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum CompactionTask {
@@ -118,38 +117,36 @@ impl LsmStorageInner {
             let guard = self.state.read();
             Arc::clone(&guard)
         };
-        let mut iterator = match _task {
-            CompactionTask::ForceFullCompaction {
-                l0_sstables,
-                l1_sstables,
-            } => {
-                // create l0 sstable iterators
-                let mut l0_sst_iters = Vec::with_capacity(l0_sstables.len());
-                for id in l0_sstables.iter() {
-                    l0_sst_iters.push(Box::new(SsTableIterator::create_and_seek_to_first(
-                        Arc::clone(state.sstables.get(id).unwrap()),
-                    )?));
+        match _task {
+            CompactionTask::ForceFullCompaction { l0_sstables, l1_sstables} => {
+                self.build_sorted_run(&mut TwoMergeIterator::create(
+                    state.create_merge_iterator(l0_sstables)?,
+                    state.create_concat_iterator(l1_sstables)?,
+                )?, _task.compact_to_bottom_level())
+            },
+            CompactionTask::Simple(task) => {
+                if task.upper_level.is_none() {
+                    return self.build_sorted_run(&mut TwoMergeIterator::create(
+                        state.create_merge_iterator(&task.upper_level_sst_ids)?,
+                        state.create_concat_iterator(&task.lower_level_sst_ids)?,
+                    )?, _task.compact_to_bottom_level());
                 }
-                // retrieve l1 sstable
-                let mut l1_sst = Vec::with_capacity(l1_sstables.len());
-                for id in l1_sstables.iter() {
-                    l1_sst.push(Arc::clone(state.sstables.get(id).unwrap()));
-                }
-                // use concat iterator to create merge iterator
-                TwoMergeIterator::create(
-                    MergeIterator::create(l0_sst_iters),
-                    SstConcatIterator::create_and_seek_to_first(l1_sst)?,
-                )?
+                self.build_sorted_run(&mut TwoMergeIterator::create(
+                    state.create_concat_iterator(&task.upper_level_sst_ids)?,
+                    state.create_concat_iterator(&task.lower_level_sst_ids)?,
+                )?, _task.compact_to_bottom_level())
             }
             _ => unimplemented!(),
-        };
+        }
+    }
 
+    fn build_sorted_run<I>(&self, iterator: &mut I, ignore_deleted: bool) -> Result<Vec<Arc<SsTable>>> 
+    where I: for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>> {
         // consume the iterator adds key-value to sst_builder
         let mut sst_builder = Some(SsTableBuilder::new(self.options.block_size));
         let mut sorted_run = Vec::new();
         while iterator.is_valid() {
-            // In ForceFullCompaction, those deleted key doesn't need to be written into sst file
-            if iterator.value().is_empty() {
+            if ignore_deleted && iterator.value().is_empty() {
                 iterator.next()?;
                 continue;
             }
@@ -214,6 +211,7 @@ impl LsmStorageInner {
         Ok(())
     }
 
+
     fn trigger_compaction(&self) -> Result<()> {
         let (lsm_storage_state, remove_ids, sorted_run) = {
             let snapshort = self.state.read();
@@ -235,15 +233,15 @@ impl LsmStorageInner {
             (lsm_storage_state, remove_ids, sorted_run)
         };
         {
-            let _lock = self.state_lock.lock();
             let mut lsm_storage_state = lsm_storage_state;
-            let mut guard = self.state.write();
             for sst_id in remove_ids.iter() {
                 lsm_storage_state.sstables.remove(sst_id);
             }
             for sst in sorted_run {
                 lsm_storage_state.sstables.insert(sst.sst_id(), sst);
             }
+            let _lock = self.state_lock.lock();
+            let mut guard = self.state.write();
             *guard = Arc::new(lsm_storage_state);
         }
 

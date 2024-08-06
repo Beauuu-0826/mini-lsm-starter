@@ -35,7 +35,7 @@ impl SimpleLeveledCompactionController {
         &self,
         _snapshot: &LsmStorageState,
     ) -> Option<SimpleLeveledCompactionTask> {
-        if _snapshot.l0_sstables.len().gt(&self.options.level0_file_num_compaction_trigger) {
+        if _snapshot.l0_sstables.len().ge(&self.options.level0_file_num_compaction_trigger) {
             return Some(SimpleLeveledCompactionTask {
                 upper_level: None,
                 upper_level_sst_ids: _snapshot.l0_sstables.clone(),

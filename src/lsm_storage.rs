@@ -349,7 +349,13 @@ impl LsmStorageInner {
         for (_, sst_ids) in state.levels.iter() {
             let mut level_sstables = Vec::with_capacity(sst_ids.len());
             for id in sst_ids {
-                level_sstables.push(Arc::clone(state.sstables.get(id).unwrap()));
+                let sst = state.sstables.get(id).unwrap();
+                if sst.key_within(KeyBytes::from_bytes(Bytes::copy_from_slice(_key))) {
+                    if sst.bloom.is_some() && !sst.bloom.as_ref().unwrap().may_contain(fingerprint32(_key)) {
+                        continue;
+                    }
+                }
+                level_sstables.push(Arc::clone(sst));
             }
             concat_iters.push(Box::new(SstConcatIterator::create_and_seek_to_key(
                 level_sstables,
@@ -501,7 +507,10 @@ impl LsmStorageInner {
         for (_, sst_ids) in state.levels.iter() {
             let mut level_sstables = Vec::with_capacity(sst_ids.len());
             for id in sst_ids {
-                level_sstables.push(Arc::clone(state.sstables.get(id).unwrap()));
+                let sst = state.sstables.get(id).unwrap();
+                if sst.range_overlap((map_bound(_lower), map_bound(_upper))) {
+                    level_sstables.push(Arc::clone(sst));
+                }
             }
             concat_iters.push(Box::new(SstConcatIterator::create_and_seek_to_first(level_sstables)?));
         }

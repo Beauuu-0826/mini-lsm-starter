@@ -19,7 +19,11 @@ pub struct SstConcatIterator {
 impl SstConcatIterator {
     pub fn create_and_seek_to_first(sstables: Vec<Arc<SsTable>>) -> Result<Self> {
         if sstables.is_empty() {
-            return Ok(Self { current: None, next_sst_idx: 0, sstables });
+            return Ok(Self {
+                current: None,
+                next_sst_idx: 0,
+                sstables,
+            });
         }
         let current =
             SsTableIterator::create_and_seek_to_first(Arc::clone(sstables.get(0).unwrap()))?;
@@ -39,7 +43,11 @@ impl SstConcatIterator {
             }
         }
         if pick == sstables.len() {
-            return Ok(Self { current: None, next_sst_idx: pick, sstables });
+            return Ok(Self {
+                current: None,
+                next_sst_idx: pick,
+                sstables,
+            });
         }
         let current =
             SsTableIterator::create_and_seek_to_key(Arc::clone(sstables.get(pick).unwrap()), key)?;
@@ -71,7 +79,8 @@ impl StorageIterator for SstConcatIterator {
             return Ok(());
         }
         self.current.as_mut().unwrap().next()?;
-        if !self.current.as_ref().unwrap().is_valid() && self.next_sst_idx < self.sstables.len() - 1 {
+        if !self.current.as_ref().unwrap().is_valid() && self.next_sst_idx < self.sstables.len() - 1
+        {
             self.current = Some(SsTableIterator::create_and_seek_to_first(Arc::clone(
                 &self.sstables[self.next_sst_idx],
             ))?);

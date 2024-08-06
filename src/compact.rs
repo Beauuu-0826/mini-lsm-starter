@@ -197,7 +197,9 @@ impl LsmStorageInner {
             for sst_id in l0_sstables.iter().chain(l1_sstables.iter()) {
                 state.sstables.remove(sst_id);
             }
-            state.l0_sstables.truncate(state.l0_sstables.len() - l0_sstables.len());
+            state
+                .l0_sstables
+                .truncate(state.l0_sstables.len() - l0_sstables.len());
             state.levels.get_mut(0).unwrap().1.clear();
             for sst in sorted_run {
                 let sst_id = sst.sst_id();
@@ -213,7 +215,42 @@ impl LsmStorageInner {
     }
 
     fn trigger_compaction(&self) -> Result<()> {
-        unimplemented!()
+        let (lsm_storage_state, remove_ids, sorted_run) = {
+            let snapshort = self.state.read();
+            let task = self
+                .compaction_controller
+                .generate_compaction_task(&snapshort);
+            if task.is_none() {
+                return Ok(());
+            }
+            let sorted_run = self.compact(&task.as_ref().unwrap())?;
+            let sorted_run_ids: Vec<usize> = sorted_run.iter().map(|sst| sst.sst_id()).collect();
+            let (lsm_storage_state, remove_ids) =
+                self.compaction_controller.apply_compaction_result(
+                    &snapshort,
+                    task.as_ref().unwrap(),
+                    &sorted_run_ids,
+                    false,
+                );
+            (lsm_storage_state, remove_ids, sorted_run)
+        };
+        {
+            let _lock = self.state_lock.lock();
+            let mut lsm_storage_state = lsm_storage_state;
+            let mut guard = self.state.write();
+            for sst_id in remove_ids.iter() {
+                lsm_storage_state.sstables.remove(sst_id);
+            }
+            for sst in sorted_run {
+                lsm_storage_state.sstables.insert(sst.sst_id(), sst);
+            }
+            *guard = Arc::new(lsm_storage_state);
+        }
+
+        for sst_id in remove_ids.into_iter() {
+            std::fs::remove_file(self.path_of_sst(sst_id))?;
+        }
+        Ok(())
     }
 
     pub(crate) fn spawn_compaction_thread(

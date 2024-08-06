@@ -327,13 +327,21 @@ impl LsmStorageInner {
                 )?));
             }
         }
-        let mut l1_sst = Vec::with_capacity(state.levels[0].1.len());
-        for id in state.levels[0].1.iter() {
-            l1_sst.push(Arc::clone(state.sstables.get(id).unwrap()));
+        // level concat iterators
+        let mut concat_iters = Vec::with_capacity(state.levels.len());
+        for (_, sst_ids) in state.levels.iter() {
+            let mut level_sstables = Vec::with_capacity(sst_ids.len());
+            for id in sst_ids {
+                level_sstables.push(Arc::clone(state.sstables.get(id).unwrap()));
+            }
+            concat_iters.push(Box::new(SstConcatIterator::create_and_seek_to_key(
+                level_sstables,
+                KeySlice::from_slice(_key),
+            )?));
         }
         let iterator = TwoMergeIterator::create(
             MergeIterator::create(sst_iters),
-            SstConcatIterator::create_and_seek_to_key(l1_sst, KeySlice::from_slice(_key))?,
+            MergeIterator::create(concat_iters),
         )?;
         if iterator.is_valid() && iterator.key().raw_ref() == _key && !iterator.value().is_empty() {
             return Ok(Some(Bytes::copy_from_slice(iterator.value())));
@@ -471,18 +479,22 @@ impl LsmStorageInner {
                 )?));
             }
         }
-        // l1 sst
-        let mut l1_sst = Vec::with_capacity(state.levels[0].1.len());
-        for id in state.levels[0].1.iter() {
-            l1_sst.push(Arc::clone(state.sstables.get(id).unwrap()));
+        // level concat iterators
+        let mut concat_iters = Vec::with_capacity(state.levels.len());
+        for (_, sst_ids) in state.levels.iter() {
+            let mut level_sstables = Vec::with_capacity(sst_ids.len());
+            for id in sst_ids {
+                level_sstables.push(Arc::clone(state.sstables.get(id).unwrap()));
+            }
+            concat_iters.push(Box::new(SstConcatIterator::create_and_seek_to_first(level_sstables)?));
         }
-        
+
         let mut lsm_iterator = LsmIterator::new(
             TwoMergeIterator::create(
                 MergeIterator::create(iters),
                 TwoMergeIterator::create(
                     MergeIterator::create(sst_iters),
-                    SstConcatIterator::create_and_seek_to_first(l1_sst)?,
+                    MergeIterator::create(concat_iters),
                 )?,
             )?,
             map_bound(_upper),

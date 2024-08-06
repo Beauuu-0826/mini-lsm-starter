@@ -35,7 +35,28 @@ impl SimpleLeveledCompactionController {
         &self,
         _snapshot: &LsmStorageState,
     ) -> Option<SimpleLeveledCompactionTask> {
-        unimplemented!()
+        if _snapshot.l0_sstables.len().gt(&self.options.level0_file_num_compaction_trigger) {
+            return Some(SimpleLeveledCompactionTask {
+                upper_level: None,
+                upper_level_sst_ids: _snapshot.l0_sstables.clone(),
+                lower_level: 1,
+                lower_level_sst_ids: _snapshot.levels[0].1.clone(),
+                is_lower_level_bottom_level: 1 == self.options.max_levels,
+            });
+        }
+        for level_id in 0..self.options.max_levels - 1 {
+            if (_snapshot.levels[level_id + 1].1.len() as f64
+                / _snapshot.levels[level_id].1.len() as f64) * 100.0 < self.options.size_ratio_percent as f64 {
+                return Some(SimpleLeveledCompactionTask {
+                    upper_level: Some(level_id + 1),
+                    upper_level_sst_ids: _snapshot.levels[level_id].1.clone(),
+                    lower_level: level_id + 2,
+                    lower_level_sst_ids: _snapshot.levels[level_id + 1].1.clone(),
+                    is_lower_level_bottom_level: level_id + 2 == self.options.max_levels,
+                });
+            }
+        }
+        None
     }
 
     /// Apply the compaction result.
@@ -51,6 +72,19 @@ impl SimpleLeveledCompactionController {
         _task: &SimpleLeveledCompactionTask,
         _output: &[usize],
     ) -> (LsmStorageState, Vec<usize>) {
-        unimplemented!()
+        let mut lsm_storage_state = _snapshot.clone();
+        if _task.upper_level.is_none() {
+            lsm_storage_state.l0_sstables
+                .truncate(lsm_storage_state.l0_sstables.len() - _task.upper_level_sst_ids.len());
+        } else {
+            lsm_storage_state.levels[_task.upper_level.unwrap() - 1].1.clear();
+        }
+        lsm_storage_state.levels[_task.lower_level - 1].1.clear();
+        lsm_storage_state.levels[_task.lower_level - 1].1.extend(_output);
+
+        let mut remove_sst_id = Vec::new();
+        remove_sst_id.extend(_task.upper_level_sst_ids.iter());
+        remove_sst_id.extend(_task.lower_level_sst_ids.iter());
+        (lsm_storage_state, remove_sst_id)
     }
 }

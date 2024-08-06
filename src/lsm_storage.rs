@@ -354,8 +354,8 @@ impl LsmStorageInner {
                     if sst.bloom.is_some() && !sst.bloom.as_ref().unwrap().may_contain(fingerprint32(_key)) {
                         continue;
                     }
+                    level_sstables.push(Arc::clone(sst));
                 }
-                level_sstables.push(Arc::clone(sst));
             }
             concat_iters.push(Box::new(SstConcatIterator::create_and_seek_to_key(
                 level_sstables,

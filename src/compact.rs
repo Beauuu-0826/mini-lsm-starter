@@ -172,14 +172,14 @@ impl LsmStorageInner {
             Some(Arc::clone(&self.block_cache)),
             self.path_of_sst(sst_id),
         )?));
-        return Ok(sorted_run);
+        Ok(sorted_run)
     }
 
     pub fn force_full_compaction(&self) -> Result<()> {
         let (l0_sstables, l1_sstables) = {
             let guard = self.state.read();
-            let l0_sstables: Vec<usize> = guard.l0_sstables.iter().map(|id| *id).collect();
-            let l1_sstables: Vec<usize> = guard.levels[0].1.iter().map(|id| *id).collect();
+            let l0_sstables: Vec<usize> = guard.l0_sstables.iter().copied().collect();
+            let l1_sstables: Vec<usize> = guard.levels[0].1.iter().copied().collect();
             (l0_sstables, l1_sstables)
         };
         let sorted_run = self.compact(&CompactionTask::ForceFullCompaction {

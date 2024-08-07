@@ -82,10 +82,10 @@ impl LsmStorageState {
     }
 
     pub fn create_concat_iterator(&self, sst_ids: &Vec<usize>) -> Result<SstConcatIterator> {
-        Ok(SstConcatIterator::create_and_seek_to_first(self.retrieve_sstable(sst_ids))?)
+        SstConcatIterator::create_and_seek_to_first(self.retrieve_sstable(sst_ids))
     }
 
-    fn retrieve_sstable(&self, sst_ids: &Vec<usize>) -> Vec<Arc<SsTable>> {
+    fn retrieve_sstable(&self, sst_ids: &[usize]) -> Vec<Arc<SsTable>> {
         sst_ids.iter().map(|sst_id| Arc::clone(self.sstables.get(sst_id).unwrap())).collect()
     }
 }

@@ -26,7 +26,7 @@ impl SstConcatIterator {
             });
         }
         let current =
-            SsTableIterator::create_and_seek_to_first(Arc::clone(sstables.get(0).unwrap()))?;
+            SsTableIterator::create_and_seek_to_first(Arc::clone(sstables.first().unwrap()))?;
         Ok(Self {
             current: Some(current),
             next_sst_idx: 1,

@@ -72,7 +72,7 @@ impl LsmStorageState {
         }
     }
 
-    pub fn create_merge_iterator(&self, sst_ids: &Vec<usize>) -> Result<MergeIterator<SsTableIterator>> {
+    pub fn create_merge_iterator(&self, sst_ids: &[usize]) -> Result<MergeIterator<SsTableIterator>> {
         let sstables = self.retrieve_sstable(sst_ids);
         let mut iters = Vec::with_capacity(sstables.len());
         for sst in sstables.into_iter() {
@@ -81,7 +81,7 @@ impl LsmStorageState {
         Ok(MergeIterator::create(iters))
     }
 
-    pub fn create_concat_iterator(&self, sst_ids: &Vec<usize>) -> Result<SstConcatIterator> {
+    pub fn create_concat_iterator(&self, sst_ids: &[usize]) -> Result<SstConcatIterator> {
         SstConcatIterator::create_and_seek_to_first(self.retrieve_sstable(sst_ids))
     }
 

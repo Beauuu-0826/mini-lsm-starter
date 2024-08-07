@@ -178,8 +178,8 @@ impl LsmStorageInner {
     pub fn force_full_compaction(&self) -> Result<()> {
         let (l0_sstables, l1_sstables) = {
             let guard = self.state.read();
-            let l0_sstables: Vec<usize> = guard.l0_sstables.iter().copied().collect();
-            let l1_sstables: Vec<usize> = guard.levels[0].1.iter().copied().collect();
+            let l0_sstables: Vec<usize> = guard.l0_sstables.to_vec();
+            let l1_sstables: Vec<usize> = guard.levels[0].1.to_vec();
             (l0_sstables, l1_sstables)
         };
         let sorted_run = self.compact(&CompactionTask::ForceFullCompaction {

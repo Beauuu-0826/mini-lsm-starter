@@ -166,9 +166,6 @@ fn test_task2_concat_iterator() {
         )));
     }
     for key in 0..120 {
-        if key == 19 {
-            println!("Debug");
-        }
         let iter = SstConcatIterator::create_and_seek_to_key(
             sstables.clone(),
             KeySlice::for_testing_from_slice_no_ts(format!("{:05}", key).as_bytes()),

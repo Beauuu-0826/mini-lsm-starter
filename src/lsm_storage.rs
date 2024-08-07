@@ -1,6 +1,5 @@
 #![allow(dead_code)] // REMOVE THIS LINE after fully implementing this functionality
 
-use std::borrow::BorrowMut;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fs;
@@ -432,10 +431,10 @@ impl LsmStorageInner {
         let new_memtable = Arc::new(MemTable::create(self.next_sst_id()));
         {
             let mut guard = self.state.write();
-            let state = guard.borrow_mut();
-            let old_memtable = Arc::clone(&state.memtable);
-            Arc::make_mut(state).imm_memtables.insert(0, old_memtable);
-            Arc::make_mut(state).memtable = new_memtable;
+            let mut snapshot = guard.as_ref().clone();
+            snapshot.imm_memtables.insert(0, Arc::clone(&snapshot.memtable));
+            snapshot.memtable = new_memtable;
+            *guard = Arc::new(snapshot);
         }
         Ok(())
     }
@@ -446,26 +445,27 @@ impl LsmStorageInner {
             return Ok(());
         }
 
-        let _lock = self.state_lock.lock();
         let imm_memtable = {
-            let mut guard = self.state.write();
-            let state = guard.borrow_mut();
-            Arc::make_mut(state).imm_memtables.pop().unwrap()
+            let guard = self.state.read();
+            Arc::clone(guard.imm_memtables.last().unwrap())
         };
 
-        let sst_id = self.next_sst_id();
         let mut sst_builder = SsTableBuilder::new(self.options.block_size);
         imm_memtable.flush(&mut sst_builder)?;
         let sst = sst_builder.build(
-            sst_id,
+            imm_memtable.id(),
             Some(Arc::clone(&self.block_cache)),
-            self.path_of_sst(sst_id),
+            self.path_of_sst(imm_memtable.id()),
         )?;
         {
+            let _lock = self.state_lock.lock();
             let mut guard = self.state.write();
-            let state = guard.borrow_mut();
-            Arc::make_mut(state).l0_sstables.insert(0, sst_id);
-            Arc::make_mut(state).sstables.insert(sst_id, Arc::new(sst));
+            let mut snapshot = guard.as_ref().clone();
+            snapshot.imm_memtables.pop();
+            snapshot.l0_sstables.insert(0, sst.sst_id());
+            println!("Flushing {}.sst with size={}", sst.sst_id(), sst.table_size());
+            snapshot.sstables.insert(sst.sst_id(), Arc::new(sst));
+            *guard = Arc::new(snapshot);
         }
         Ok(())
     }

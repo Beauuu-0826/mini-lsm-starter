@@ -79,8 +79,7 @@ impl StorageIterator for SstConcatIterator {
             return Ok(());
         }
         self.current.as_mut().unwrap().next()?;
-        if !self.current.as_ref().unwrap().is_valid() && self.next_sst_idx < self.sstables.len() - 1
-        {
+        if !self.current.as_ref().unwrap().is_valid() && self.next_sst_idx < self.sstables.len() {
             self.current = Some(SsTableIterator::create_and_seek_to_first(Arc::clone(
                 &self.sstables[self.next_sst_idx],
             ))?);

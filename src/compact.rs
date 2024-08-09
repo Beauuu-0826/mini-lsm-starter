@@ -15,6 +15,7 @@ pub use simple_leveled::{
 };
 pub use tiered::{TieredCompactionController, TieredCompactionOptions, TieredCompactionTask};
 
+use crate::iterators::merge_iterator::MergeIterator;
 use crate::iterators::two_merge_iterator::TwoMergeIterator;
 use crate::iterators::StorageIterator;
 use crate::key::KeySlice;
@@ -134,6 +135,16 @@ impl LsmStorageInner {
                     state.create_concat_iterator(&task.upper_level_sst_ids)?,
                     state.create_concat_iterator(&task.lower_level_sst_ids)?,
                 )?, _task.compact_to_bottom_level())
+            },
+            CompactionTask::Tiered(task) => {
+                let mut concat_iters = Vec::new();
+                for (_, sst_ids) in task.tiers.iter(){
+                    concat_iters.push(Box::new(state.create_concat_iterator(sst_ids)?));
+                }
+                self.build_sorted_run(
+                    &mut MergeIterator::create(concat_iters),
+                    _task.compact_to_bottom_level()
+                )
             }
             _ => unimplemented!(),
         }
@@ -230,17 +241,28 @@ impl LsmStorageInner {
             let _lock = self.state_lock.lock();
             let mut guard = self.state.write();
             let mut snapshot = guard.as_ref().clone();
+            // maintain sstables
             for sst_id in remove_ids.iter() {
                 snapshot.sstables.remove(sst_id);
             }
             for sst in sorted_run {
                 snapshot.sstables.insert(sst.sst_id(), sst);
             }
-            snapshot.levels = lsm_storage_state.levels;
-            let l0_sstables = snapshot.l0_sstables.clone();
-            snapshot.l0_sstables = l0_sstables.into_iter()
-                .filter(|id| !remove_ids.contains(id))
-                .collect();
+
+            // update levels depend on compaction task
+            match task {
+                CompactionTask::Simple(_) => {
+                    let l0_sstables = snapshot.l0_sstables.clone();
+                    snapshot.l0_sstables = l0_sstables.into_iter().filter(|id| !remove_ids.contains(id)).collect();
+                    snapshot.levels = lsm_storage_state.levels;
+                },
+                CompactionTask::Tiered(task) => {
+                    let prev_tier_len = task.tiers.len() + lsm_storage_state.levels.len() - 1;
+                    snapshot.levels.truncate(snapshot.levels.len() - prev_tier_len);
+                    snapshot.levels.extend(lsm_storage_state.levels.into_iter());
+                },
+                _ => (),
+            }
             *guard = Arc::new(snapshot);
         }
 

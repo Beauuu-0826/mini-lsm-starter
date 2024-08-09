@@ -189,6 +189,9 @@ impl SsTable {
 
     /// Read a block from disk, with block cache. (Day 4)
     pub fn read_block_cached(&self, block_idx: usize) -> Result<Arc<Block>> {
+        if self.block_cache.is_none() {
+            return self.read_block(block_idx);
+        }
         match self
             .block_cache
             .as_ref()

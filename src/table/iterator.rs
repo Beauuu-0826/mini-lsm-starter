@@ -15,7 +15,7 @@ pub struct SsTableIterator {
 impl SsTableIterator {
     /// Create a new iterator and seek to the first key-value pair in the first data block.
     pub fn create_and_seek_to_first(table: Arc<SsTable>) -> Result<Self> {
-        let block = table.read_block(0)?;
+        let block = table.read_block_cached(0)?;
         Ok(Self {
             table,
             blk_iter: BlockIterator::create_and_seek_to_first(block),
@@ -26,7 +26,7 @@ impl SsTableIterator {
     /// Seek to the first key-value pair in the first data block.
     pub fn seek_to_first(&mut self) -> Result<()> {
         if self.blk_idx != 0 {
-            let block = self.table.read_block(0)?;
+            let block = self.table.read_block_cached(0)?;
             self.blk_idx = 0;
             self.blk_iter = BlockIterator::create_and_seek_to_first(block);
             return Ok(());
@@ -49,7 +49,7 @@ impl SsTableIterator {
         if self.blk_idx == self.table.find_block_idx(key) {
             self.blk_iter.seek_to_key(key);
         } else {
-            let block = self.table.read_block(self.table.find_block_idx(key))?;
+            let block = self.table.read_block_cached(self.table.find_block_idx(key))?;
             self.blk_idx = self.table.find_block_idx(key);
             self.blk_iter = BlockIterator::create_and_seek_to_key(block, key);
         }
@@ -81,7 +81,7 @@ impl StorageIterator for SsTableIterator {
         self.blk_iter.next();
         while !self.blk_iter.is_valid() && self.blk_idx < self.table.block_meta.len() - 1 {
             self.blk_idx += 1;
-            let block = self.table.read_block(self.blk_idx)?;
+            let block = self.table.read_block_cached(self.blk_idx)?;
             self.blk_iter = BlockIterator::create_and_seek_to_first(block);
         }
         Ok(())

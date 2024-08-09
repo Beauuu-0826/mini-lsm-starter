@@ -462,7 +462,11 @@ impl LsmStorageInner {
             let mut guard = self.state.write();
             let mut snapshot = guard.as_ref().clone();
             snapshot.imm_memtables.pop();
-            snapshot.l0_sstables.insert(0, sst.sst_id());
+            if self.compaction_controller.flush_to_l0() {
+                snapshot.l0_sstables.insert(0, sst.sst_id());
+            } else {
+                snapshot.levels.insert(0, (sst.sst_id(), vec![sst.sst_id()]));
+            }
             println!("Flushing {}.sst with size={}", sst.sst_id(), sst.table_size());
             snapshot.sstables.insert(sst.sst_id(), Arc::new(sst));
             *guard = Arc::new(snapshot);

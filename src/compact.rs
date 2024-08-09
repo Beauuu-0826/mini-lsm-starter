@@ -259,7 +259,7 @@ impl LsmStorageInner {
                 CompactionTask::Tiered(task) => {
                     let prev_tier_len = task.tiers.len() + lsm_storage_state.levels.len() - 1;
                     snapshot.levels.truncate(snapshot.levels.len() - prev_tier_len);
-                    snapshot.levels.extend(lsm_storage_state.levels.into_iter());
+                    snapshot.levels.extend(lsm_storage_state.levels);
                 },
                 _ => (),
             }

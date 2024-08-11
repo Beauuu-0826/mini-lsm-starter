@@ -72,6 +72,11 @@ impl SsTableBuilder {
         self.data.len()
     }
 
+    /// Check if the sst builder is empty
+    pub fn is_empty(&self) -> bool {
+        self.data.len() == 0 && self.builder.is_empty()
+    }
+
     /// Builds the SSTable and writes it to the given path. Use the `FileObject` structure to manipulate the disk objects.
     pub fn build(
         self,

@@ -4,6 +4,7 @@ mod leveled;
 mod simple_leveled;
 mod tiered;
 
+use core::task;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -173,10 +174,7 @@ impl LsmStorageInner {
             }
             let builder_inner = sst_builder.as_mut().unwrap();
             builder_inner.add(iterator.key(), iterator.value());
-            if builder_inner
-                .estimated_size()
-                .gt(&self.options.target_sst_size)
-            {
+            if builder_inner.estimated_size().gt(&self.options.target_sst_size) {
                 let sst_id = self.next_sst_id();
                 sorted_run.push(Arc::new(sst_builder.take().unwrap().build(
                     sst_id,
@@ -188,12 +186,14 @@ impl LsmStorageInner {
             iterator.next()?;
         }
 
-        let sst_id = self.next_sst_id();
-        sorted_run.push(Arc::new(sst_builder.take().unwrap().build(
-            sst_id,
-            Some(Arc::clone(&self.block_cache)),
-            self.path_of_sst(sst_id),
-        )?));
+        if !sst_builder.as_ref().unwrap().is_empty() {
+            let sst_id = self.next_sst_id();
+            sorted_run.push(Arc::new(sst_builder.take().unwrap().build(
+                sst_id,
+                Some(Arc::clone(&self.block_cache)),
+                self.path_of_sst(sst_id),
+            )?));
+        }
         Ok(sorted_run)
     }
 
@@ -262,20 +262,15 @@ impl LsmStorageInner {
 
             // update levels depend on compaction task
             match task {
-                CompactionTask::Simple(_) => {
-                    snapshot.l0_sstables.retain(|e| !remove_ids.contains(e));
-                    snapshot.levels = lsm_storage_state.levels;
-                },
                 CompactionTask::Tiered(task) => {
                     let prev_tier_len = task.tiers.len() + lsm_storage_state.levels.len() - 1;
                     snapshot.levels.truncate(snapshot.levels.len() - prev_tier_len);
                     snapshot.levels.extend(lsm_storage_state.levels);
                 },
-                CompactionTask::Leveled(_) => {
+                _ => {
                     snapshot.l0_sstables.retain(|e| !remove_ids.contains(e));
                     snapshot.levels = lsm_storage_state.levels;
-                },
-                _ => (),
+                }
             }
             *guard = Arc::new(snapshot);
         }

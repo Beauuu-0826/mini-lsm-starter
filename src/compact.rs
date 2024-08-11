@@ -4,7 +4,6 @@ mod leveled;
 mod simple_leveled;
 mod tiered;
 
-use core::task;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -119,51 +118,73 @@ impl LsmStorageInner {
             Arc::clone(&guard)
         };
         match _task {
-            CompactionTask::ForceFullCompaction { l0_sstables, l1_sstables} => {
-                self.build_sorted_run(&mut TwoMergeIterator::create(
+            CompactionTask::ForceFullCompaction {
+                l0_sstables,
+                l1_sstables,
+            } => self.build_sorted_run(
+                &mut TwoMergeIterator::create(
                     state.create_merge_iterator(l0_sstables)?,
                     state.create_concat_iterator(l1_sstables)?,
-                )?, _task.compact_to_bottom_level())
-            },
+                )?,
+                _task.compact_to_bottom_level(),
+            ),
             CompactionTask::Simple(task) => {
                 if task.upper_level.is_none() {
-                    return self.build_sorted_run(&mut TwoMergeIterator::create(
-                        state.create_merge_iterator(&task.upper_level_sst_ids)?,
-                        state.create_concat_iterator(&task.lower_level_sst_ids)?,
-                    )?, _task.compact_to_bottom_level());
+                    return self.build_sorted_run(
+                        &mut TwoMergeIterator::create(
+                            state.create_merge_iterator(&task.upper_level_sst_ids)?,
+                            state.create_concat_iterator(&task.lower_level_sst_ids)?,
+                        )?,
+                        _task.compact_to_bottom_level(),
+                    );
                 }
-                self.build_sorted_run(&mut TwoMergeIterator::create(
-                    state.create_concat_iterator(&task.upper_level_sst_ids)?,
-                    state.create_concat_iterator(&task.lower_level_sst_ids)?,
-                )?, _task.compact_to_bottom_level())
-            },
+                self.build_sorted_run(
+                    &mut TwoMergeIterator::create(
+                        state.create_concat_iterator(&task.upper_level_sst_ids)?,
+                        state.create_concat_iterator(&task.lower_level_sst_ids)?,
+                    )?,
+                    _task.compact_to_bottom_level(),
+                )
+            }
             CompactionTask::Tiered(task) => {
                 let mut concat_iters = Vec::new();
-                for (_, sst_ids) in task.tiers.iter(){
+                for (_, sst_ids) in task.tiers.iter() {
                     concat_iters.push(Box::new(state.create_concat_iterator(sst_ids)?));
                 }
                 self.build_sorted_run(
                     &mut MergeIterator::create(concat_iters),
-                    _task.compact_to_bottom_level()
+                    _task.compact_to_bottom_level(),
                 )
-            },
+            }
             CompactionTask::Leveled(task) => {
                 if task.upper_level.is_none() {
-                    return self.build_sorted_run(&mut TwoMergeIterator::create(
-                        state.create_merge_iterator(&task.upper_level_sst_ids)?,
-                        state.create_concat_iterator(&task.lower_level_sst_ids)?,
-                    )?, _task.compact_to_bottom_level());
+                    return self.build_sorted_run(
+                        &mut TwoMergeIterator::create(
+                            state.create_merge_iterator(&task.upper_level_sst_ids)?,
+                            state.create_concat_iterator(&task.lower_level_sst_ids)?,
+                        )?,
+                        _task.compact_to_bottom_level(),
+                    );
                 }
-                self.build_sorted_run(&mut TwoMergeIterator::create(
-                    state.create_concat_iterator(&task.upper_level_sst_ids)?,
-                    state.create_concat_iterator(&task.lower_level_sst_ids)?,
-                )?, _task.compact_to_bottom_level())
-            },
+                self.build_sorted_run(
+                    &mut TwoMergeIterator::create(
+                        state.create_concat_iterator(&task.upper_level_sst_ids)?,
+                        state.create_concat_iterator(&task.lower_level_sst_ids)?,
+                    )?,
+                    _task.compact_to_bottom_level(),
+                )
+            }
         }
     }
 
-    fn build_sorted_run<I>(&self, iterator: &mut I, ignore_deleted: bool) -> Result<Vec<Arc<SsTable>>> 
-    where I: for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>> {
+    fn build_sorted_run<I>(
+        &self,
+        iterator: &mut I,
+        ignore_deleted: bool,
+    ) -> Result<Vec<Arc<SsTable>>>
+    where
+        I: for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>,
+    {
         // consume the iterator adds key-value to sst_builder
         let mut sst_builder = Some(SsTableBuilder::new(self.options.block_size));
         let mut sorted_run = Vec::new();
@@ -174,7 +195,10 @@ impl LsmStorageInner {
             }
             let builder_inner = sst_builder.as_mut().unwrap();
             builder_inner.add(iterator.key(), iterator.value());
-            if builder_inner.estimated_size().gt(&self.options.target_sst_size) {
+            if builder_inner
+                .estimated_size()
+                .gt(&self.options.target_sst_size)
+            {
                 let sst_id = self.next_sst_id();
                 sorted_run.push(Arc::new(sst_builder.take().unwrap().build(
                     sst_id,
@@ -215,7 +239,9 @@ impl LsmStorageInner {
             for sst_id in l0_sstables.iter().chain(l1_sstables.iter()) {
                 snapshot.sstables.remove(sst_id);
             }
-            snapshot.l0_sstables.truncate(snapshot.l0_sstables.len() - l0_sstables.len());
+            snapshot
+                .l0_sstables
+                .truncate(snapshot.l0_sstables.len() - l0_sstables.len());
             snapshot.levels.get_mut(0).unwrap().1.clear();
             for sst in sorted_run {
                 snapshot.levels.get_mut(0).unwrap().1.push(sst.sst_id());
@@ -230,13 +256,13 @@ impl LsmStorageInner {
         Ok(())
     }
 
-
     fn trigger_compaction(&self) -> Result<()> {
         let snapshot = {
             let state = self.state.read();
             state.clone()
         };
-        let task = self.compaction_controller
+        let task = self
+            .compaction_controller
             .generate_compaction_task(&snapshot);
         if task.is_none() {
             return Ok(());
@@ -246,8 +272,12 @@ impl LsmStorageInner {
         let sorted_run = self.compact(&task)?;
         let sorted_run_ids: Vec<usize> = sorted_run.iter().map(|sst| sst.sst_id()).collect();
 
-        let (lsm_storage_state, remove_ids) =
-            self.compaction_controller.apply_compaction_result(&snapshot, &task, &sorted_run_ids, false);
+        let (lsm_storage_state, remove_ids) = self.compaction_controller.apply_compaction_result(
+            &snapshot,
+            &task,
+            &sorted_run_ids,
+            false,
+        );
         {
             let _lock = self.state_lock.lock();
             let mut guard = self.state.write();
@@ -264,9 +294,11 @@ impl LsmStorageInner {
             match task {
                 CompactionTask::Tiered(task) => {
                     let prev_tier_len = task.tiers.len() + lsm_storage_state.levels.len() - 1;
-                    snapshot.levels.truncate(snapshot.levels.len() - prev_tier_len);
+                    snapshot
+                        .levels
+                        .truncate(snapshot.levels.len() - prev_tier_len);
                     snapshot.levels.extend(lsm_storage_state.levels);
-                },
+                }
                 _ => {
                     snapshot.l0_sstables.retain(|e| !remove_ids.contains(e));
                     snapshot.levels = lsm_storage_state.levels;
@@ -275,7 +307,11 @@ impl LsmStorageInner {
             *guard = Arc::new(snapshot);
         }
 
-        println!("Compaction finished: {} files removed, {} files added", remove_ids.len(), sorted_run_ids.len());
+        println!(
+            "Compaction finished: {} files removed, {} files added",
+            remove_ids.len(),
+            sorted_run_ids.len()
+        );
         for sst_id in remove_ids.into_iter() {
             std::fs::remove_file(self.path_of_sst(sst_id))?;
         }

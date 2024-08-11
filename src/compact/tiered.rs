@@ -34,25 +34,30 @@ impl TieredCompactionController {
         }
 
         // space amplification ratio trigger compact, using file nums to esimate size
-        let estimate_engine_size = snapshot.levels.iter()
-            .map(|level| level.1.len()).sum::<usize>();
+        let estimate_engine_size = snapshot
+            .levels
+            .iter()
+            .map(|level| level.1.len())
+            .sum::<usize>();
         let last_level_size = snapshot.levels.last().unwrap().1.len();
-        if (estimate_engine_size - last_level_size) as f64 / last_level_size as f64 >=
-            self.options.max_size_amplification_percent as f64 / 100.0 {
+        if (estimate_engine_size - last_level_size) as f64 / last_level_size as f64
+            >= self.options.max_size_amplification_percent as f64 / 100.0
+        {
             return Some(TieredCompactionTask {
                 tiers: snapshot.levels.clone(),
                 bottom_tier_included: true,
-            })
+            });
         }
 
         // size ratio trigger component
         let mut accumulate_size = 0;
         for (idx, (_, level)) in snapshot.levels.iter().enumerate() {
-            if idx + 1 >= self.options.min_merge_width &&
-                (accumulate_size as f64 / level.len() as f64)
-                    >= (100.0 + self.options.size_ratio as f64) / 100.0 {
+            if idx + 1 >= self.options.min_merge_width
+                && (accumulate_size as f64 / level.len() as f64)
+                    >= (100.0 + self.options.size_ratio as f64) / 100.0
+            {
                 return Some(TieredCompactionTask {
-                    tiers: snapshot.levels[..idx+1].to_vec(),
+                    tiers: snapshot.levels[..idx + 1].to_vec(),
                     bottom_tier_included: idx + 1 == snapshot.levels.len(),
                 });
             }
@@ -62,7 +67,8 @@ impl TieredCompactionController {
         // final tier nums trigger compact
         if snapshot.levels.len() > self.options.num_tiers {
             return Some(TieredCompactionTask {
-                tiers: snapshot.levels[..snapshot.levels.len() + 1 - self.options.num_tiers].to_vec(),
+                tiers: snapshot.levels[..snapshot.levels.len() + 1 - self.options.num_tiers]
+                    .to_vec(),
                 bottom_tier_included: self.options.num_tiers == 1,
             });
         }

@@ -49,7 +49,9 @@ impl SsTableIterator {
         if self.blk_idx == self.table.find_block_idx(key) {
             self.blk_iter.seek_to_key(key);
         } else {
-            let block = self.table.read_block_cached(self.table.find_block_idx(key))?;
+            let block = self
+                .table
+                .read_block_cached(self.table.find_block_idx(key))?;
             self.blk_idx = self.table.find_block_idx(key);
             self.blk_iter = BlockIterator::create_and_seek_to_key(block, key);
         }

@@ -72,7 +72,10 @@ impl LsmStorageState {
         }
     }
 
-    pub fn create_merge_iterator(&self, sst_ids: &[usize]) -> Result<MergeIterator<SsTableIterator>> {
+    pub fn create_merge_iterator(
+        &self,
+        sst_ids: &[usize],
+    ) -> Result<MergeIterator<SsTableIterator>> {
         let sstables = self.retrieve_sstable(sst_ids);
         let mut iters = Vec::with_capacity(sstables.len());
         for sst in sstables.into_iter() {
@@ -86,7 +89,10 @@ impl LsmStorageState {
     }
 
     fn retrieve_sstable(&self, sst_ids: &[usize]) -> Vec<Arc<SsTable>> {
-        sst_ids.iter().map(|sst_id| Arc::clone(self.sstables.get(sst_id).unwrap())).collect()
+        sst_ids
+            .iter()
+            .map(|sst_id| Arc::clone(self.sstables.get(sst_id).unwrap()))
+            .collect()
     }
 }
 
@@ -334,7 +340,9 @@ impl LsmStorageInner {
         for id in state.l0_sstables.iter() {
             let sst = state.sstables.get(id).unwrap();
             if sst.key_within(KeyBytes::from_bytes(Bytes::copy_from_slice(_key))) {
-                if sst.bloom.is_some() && !sst.bloom.as_ref().unwrap().may_contain(fingerprint32(_key)) {
+                if sst.bloom.is_some()
+                    && !sst.bloom.as_ref().unwrap().may_contain(fingerprint32(_key))
+                {
                     continue;
                 }
                 sst_iters.push(Box::new(SsTableIterator::create_and_seek_to_key(
@@ -350,7 +358,9 @@ impl LsmStorageInner {
             for id in sst_ids {
                 let sst = state.sstables.get(id).unwrap();
                 if sst.key_within(KeyBytes::from_bytes(Bytes::copy_from_slice(_key))) {
-                    if sst.bloom.is_some() && !sst.bloom.as_ref().unwrap().may_contain(fingerprint32(_key)) {
+                    if sst.bloom.is_some()
+                        && !sst.bloom.as_ref().unwrap().may_contain(fingerprint32(_key))
+                    {
                         continue;
                     }
                     level_sstables.push(Arc::clone(sst));
@@ -432,7 +442,9 @@ impl LsmStorageInner {
         {
             let mut guard = self.state.write();
             let mut snapshot = guard.as_ref().clone();
-            snapshot.imm_memtables.insert(0, Arc::clone(&snapshot.memtable));
+            snapshot
+                .imm_memtables
+                .insert(0, Arc::clone(&snapshot.memtable));
             snapshot.memtable = new_memtable;
             *guard = Arc::new(snapshot);
         }
@@ -465,9 +477,15 @@ impl LsmStorageInner {
             if self.compaction_controller.flush_to_l0() {
                 snapshot.l0_sstables.insert(0, sst.sst_id());
             } else {
-                snapshot.levels.insert(0, (sst.sst_id(), vec![sst.sst_id()]));
+                snapshot
+                    .levels
+                    .insert(0, (sst.sst_id(), vec![sst.sst_id()]));
             }
-            println!("Flushing {}.sst with size={}", sst.sst_id(), sst.table_size());
+            println!(
+                "Flushing {}.sst with size={}",
+                sst.sst_id(),
+                sst.table_size()
+            );
             snapshot.sstables.insert(sst.sst_id(), Arc::new(sst));
             *guard = Arc::new(snapshot);
         }
@@ -516,7 +534,9 @@ impl LsmStorageInner {
                     level_sstables.push(Arc::clone(sst));
                 }
             }
-            concat_iters.push(Box::new(SstConcatIterator::create_and_seek_to_first(level_sstables)?));
+            concat_iters.push(Box::new(SstConcatIterator::create_and_seek_to_first(
+                level_sstables,
+            )?));
         }
 
         let mut lsm_iterator = LsmIterator::new(

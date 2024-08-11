@@ -145,8 +145,19 @@ impl LsmStorageInner {
                     &mut MergeIterator::create(concat_iters),
                     _task.compact_to_bottom_level()
                 )
-            }
-            _ => unimplemented!(),
+            },
+            CompactionTask::Leveled(task) => {
+                if task.upper_level.is_none() {
+                    return self.build_sorted_run(&mut TwoMergeIterator::create(
+                        state.create_merge_iterator(&task.upper_level_sst_ids)?,
+                        state.create_concat_iterator(&task.lower_level_sst_ids)?,
+                    )?, _task.compact_to_bottom_level());
+                }
+                self.build_sorted_run(&mut TwoMergeIterator::create(
+                    state.create_concat_iterator(&task.upper_level_sst_ids)?,
+                    state.create_concat_iterator(&task.lower_level_sst_ids)?,
+                )?, _task.compact_to_bottom_level())
+            },
         }
     }
 
@@ -252,14 +263,17 @@ impl LsmStorageInner {
             // update levels depend on compaction task
             match task {
                 CompactionTask::Simple(_) => {
-                    let l0_sstables = snapshot.l0_sstables.clone();
-                    snapshot.l0_sstables = l0_sstables.into_iter().filter(|id| !remove_ids.contains(id)).collect();
+                    snapshot.l0_sstables.retain(|e| !remove_ids.contains(e));
                     snapshot.levels = lsm_storage_state.levels;
                 },
                 CompactionTask::Tiered(task) => {
                     let prev_tier_len = task.tiers.len() + lsm_storage_state.levels.len() - 1;
                     snapshot.levels.truncate(snapshot.levels.len() - prev_tier_len);
                     snapshot.levels.extend(lsm_storage_state.levels);
+                },
+                CompactionTask::Leveled(_) => {
+                    snapshot.l0_sstables.retain(|e| !remove_ids.contains(e));
+                    snapshot.levels = lsm_storage_state.levels;
                 },
                 _ => (),
             }

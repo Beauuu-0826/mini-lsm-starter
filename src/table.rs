@@ -11,6 +11,7 @@ use std::sync::Arc;
 use anyhow::{bail, Error, Result};
 pub use builder::SsTableBuilder;
 use bytes::{Buf, BufMut, Bytes};
+use farmhash::fingerprint32;
 pub use iterator::SsTableIterator;
 
 use crate::block::Block;
@@ -271,8 +272,16 @@ impl SsTable {
         self.max_ts
     }
 
-    pub fn key_within(&self, _key: KeyBytes) -> bool {
-        self.first_key.cmp(&_key) != Ordering::Greater && self.last_key.cmp(&_key) != Ordering::Less
+    pub fn may_contain(&self, key: KeyBytes) -> bool {
+        if self.first_key > key || self.last_key < key {
+            return false;
+        }
+        return self.bloom.is_none()
+            || self
+                .bloom
+                .as_ref()
+                .unwrap()
+                .may_contain(fingerprint32(key.raw_ref()));
     }
 
     pub fn range_overlap<R>(&self, range: R) -> bool

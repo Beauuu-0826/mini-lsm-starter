@@ -176,15 +176,17 @@ impl LeveledCompactionController {
                 .retain(|e| !remove_ids.contains(e));
         }
 
-        state.levels[task.lower_level - 1].1 = {
-            let mut low_level = Vec::new();
-            let overlap_range =
-                self.find_overlapping_range(snapshot, &task.upper_level_sst_ids, task.lower_level);
-            low_level.extend(&snapshot.levels[task.lower_level - 1].1[0..overlap_range.0]);
-            low_level.extend(output);
-            low_level.extend(&snapshot.levels[task.lower_level - 1].1[overlap_range.1..]);
-            low_level
-        };
+        let overlap_range =
+            self.find_overlapping_range(snapshot, &task.upper_level_sst_ids, task.lower_level);
+        state.levels[task.lower_level - 1].1.clear();
+        state.levels[task.lower_level - 1]
+            .1
+            .extend(&snapshot.levels[task.lower_level - 1].1[0..overlap_range.0]);
+        state.levels[task.lower_level - 1].1.extend(output);
+        state.levels[task.lower_level - 1]
+            .1
+            .extend(&snapshot.levels[task.lower_level - 1].1[overlap_range.1..]);
+
         (state, remove_ids)
     }
 }

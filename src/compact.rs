@@ -1,5 +1,3 @@
-#![allow(dead_code)] // REMOVE THIS LINE after fully implementing this functionality
-
 mod leveled;
 mod simple_leveled;
 mod tiered;
@@ -236,15 +234,18 @@ impl LsmStorageInner {
             let _lock = self.state_lock.lock();
             let mut guard = self.state.write();
             let mut snapshot = guard.as_ref().clone();
-            for sst_id in l0_sstables.iter().chain(l1_sstables.iter()) {
+            let remove_ids: Vec<usize> = l0_sstables
+                .iter()
+                .chain(l1_sstables.iter())
+                .copied()
+                .collect();
+            for sst_id in remove_ids.iter() {
                 snapshot.sstables.remove(sst_id);
             }
-            snapshot
-                .l0_sstables
-                .truncate(snapshot.l0_sstables.len() - l0_sstables.len());
-            snapshot.levels.get_mut(0).unwrap().1.clear();
+            snapshot.l0_sstables.retain(|e| !remove_ids.contains(e));
+            snapshot.levels[0].1.clear();
             for sst in sorted_run {
-                snapshot.levels.get_mut(0).unwrap().1.push(sst.sst_id());
+                snapshot.levels[0].1.push(sst.sst_id());
                 snapshot.sstables.insert(sst.sst_id(), sst);
             }
             *guard = Arc::new(snapshot);

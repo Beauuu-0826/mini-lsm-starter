@@ -226,12 +226,15 @@ impl LsmStorageInner {
             let l1_sstables: Vec<usize> = guard.levels[0].1.to_vec();
             (l0_sstables, l1_sstables)
         };
-        let sorted_run = self.compact(&CompactionTask::ForceFullCompaction {
+
+        let task = CompactionTask::ForceFullCompaction {
             l0_sstables: l0_sstables.clone(),
             l1_sstables: l1_sstables.clone(),
-        })?;
+        };
+        let sorted_run = self.compact(&task)?;
+        let sorted_run_ids = sorted_run.iter().map(|sst| sst.sst_id()).collect();
         {
-            let _lock = self.state_lock.lock();
+            let lock = self.state_lock.lock();
             let mut guard = self.state.write();
             let mut snapshot = guard.as_ref().clone();
             let remove_ids: Vec<usize> = l0_sstables
@@ -249,6 +252,12 @@ impl LsmStorageInner {
                 snapshot.sstables.insert(sst.sst_id(), sst);
             }
             *guard = Arc::new(snapshot);
+
+            self.sync_dir()?;
+            self.manifest.as_ref().unwrap().add_record(
+                &lock,
+                crate::manifest::ManifestRecord::Compaction(task, sorted_run_ids),
+            )?;
         }
 
         for table_id in l0_sstables.iter().chain(l1_sstables.iter()) {
@@ -292,7 +301,7 @@ impl LsmStorageInner {
             }
 
             // update levels depend on compaction task
-            match task {
+            match &task {
                 CompactionTask::Tiered(task) => {
                     let prev_tier_len = task.tiers.len() + lsm_storage_state.levels.len() - 1;
                     snapshot
@@ -306,6 +315,12 @@ impl LsmStorageInner {
                 }
             }
             *guard = Arc::new(snapshot);
+
+            self.sync_dir()?;
+            self.manifest.as_ref().unwrap().add_record(
+                &_lock,
+                crate::manifest::ManifestRecord::Compaction(task, sorted_run_ids.clone()),
+            )?;
         }
 
         println!(

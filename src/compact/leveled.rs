@@ -162,7 +162,7 @@ impl LeveledCompactionController {
         snapshot: &LsmStorageState,
         task: &LeveledCompactionTask,
         output: &[usize],
-        _in_recovery: bool,
+        in_recovery: bool,
     ) -> (LsmStorageState, Vec<usize>) {
         let mut remove_ids = Vec::new();
         remove_ids.extend(task.upper_level_sst_ids.iter());
@@ -176,16 +176,23 @@ impl LeveledCompactionController {
                 .retain(|e| !remove_ids.contains(e));
         }
 
-        let overlap_range =
-            self.find_overlapping_range(snapshot, &task.upper_level_sst_ids, task.lower_level);
-        state.levels[task.lower_level - 1].1.clear();
-        state.levels[task.lower_level - 1]
-            .1
-            .extend(&snapshot.levels[task.lower_level - 1].1[0..overlap_range.0]);
-        state.levels[task.lower_level - 1].1.extend(output);
-        state.levels[task.lower_level - 1]
-            .1
-            .extend(&snapshot.levels[task.lower_level - 1].1[overlap_range.1..]);
+        if in_recovery {
+            state.levels[task.lower_level - 1]
+                .1
+                .retain(|e| !remove_ids.contains(e));
+            state.levels[task.lower_level - 1].1.extend(output);
+        } else {
+            let overlap_range =
+                self.find_overlapping_range(snapshot, &task.upper_level_sst_ids, task.lower_level);
+            state.levels[task.lower_level - 1].1.clear();
+            state.levels[task.lower_level - 1]
+                .1
+                .extend(&snapshot.levels[task.lower_level - 1].1[0..overlap_range.0]);
+            state.levels[task.lower_level - 1].1.extend(output);
+            state.levels[task.lower_level - 1]
+                .1
+                .extend(&snapshot.levels[task.lower_level - 1].1[overlap_range.1..]);
+        }
 
         (state, remove_ids)
     }

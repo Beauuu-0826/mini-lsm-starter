@@ -2,7 +2,7 @@
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::fs;
+use std::fs::{self, File};
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicUsize;
@@ -23,10 +23,10 @@ use crate::iterators::two_merge_iterator::TwoMergeIterator;
 use crate::iterators::StorageIterator;
 use crate::key::{KeyBytes, KeySlice};
 use crate::lsm_iterator::{FusedIterator, LsmIterator};
-use crate::manifest::Manifest;
+use crate::manifest::{Manifest, ManifestRecord};
 use crate::mem_table::{map_bound, MemTable};
 use crate::mvcc::LsmMvccInner;
-use crate::table::{SsTable, SsTableBuilder, SsTableIterator};
+use crate::table::{FileObject, SsTable, SsTableBuilder, SsTableIterator};
 
 pub type BlockCache = moka::sync::Cache<(usize, usize), Arc<Block>>;
 
@@ -184,9 +184,20 @@ impl Drop for MiniLsm {
 
 impl MiniLsm {
     pub fn close(&self) -> Result<()> {
-        let _lock = self.inner.state_lock.lock();
+        // TODO no need to gain lock here?
         self.compaction_notifier.send(()).ok();
         self.flush_notifier.send(()).ok();
+
+        if !self.inner.options.enable_wal {
+            if !self.inner.state.read().memtable.is_empty() {
+                self.inner
+                    .force_freeze_memtable(&self.inner.state_lock.lock())?;
+            }
+            while !self.inner.state.read().imm_memtables.is_empty() {
+                self.inner.force_flush_next_imm_memtable()?;
+            }
+        }
+
         Ok(())
     }
 
@@ -271,7 +282,8 @@ impl LsmStorageInner {
     pub(crate) fn open(path: impl AsRef<Path>, options: LsmStorageOptions) -> Result<Self> {
         let path = path.as_ref();
         fs::create_dir_all(path)?;
-        let state = LsmStorageState::create(&options);
+        let mut state = LsmStorageState::create(&options);
+        let block_cache = Arc::new(BlockCache::new(1024));
 
         let compaction_controller = match &options.compaction_options {
             CompactionOptions::Leveled(options) => {
@@ -286,14 +298,65 @@ impl LsmStorageInner {
             CompactionOptions::NoCompaction => CompactionController::NoCompaction,
         };
 
+        let (manifest, records) = Manifest::recover(path.join("MANIFEST"))?;
+        let mut need_load_ids = Vec::new();
+        for record in records.into_iter() {
+            match record {
+                ManifestRecord::Compaction(task, mut sorted_run_ids) => {
+                    let (new_state, remove_ids) = compaction_controller.apply_compaction_result(
+                        &state,
+                        &task,
+                        &sorted_run_ids,
+                        true,
+                    );
+                    need_load_ids.retain(|e| !remove_ids.contains(e));
+                    need_load_ids.append(&mut sorted_run_ids);
+                    state = new_state;
+                }
+                ManifestRecord::Flush(sst_id) => {
+                    need_load_ids.push(sst_id);
+                    if compaction_controller.flush_to_l0() {
+                        state.l0_sstables.insert(0, sst_id);
+                    } else {
+                        state.levels.insert(0, (sst_id, vec![sst_id]));
+                    }
+                }
+                _ => (),
+            }
+        }
+        let max_used_id = need_load_ids.iter().copied().max().unwrap_or(0) + 1;
+        state.memtable = Arc::new(MemTable::create(max_used_id));
+        for sst_id in need_load_ids {
+            let sst = SsTable::open(
+                sst_id,
+                Some(Arc::clone(&block_cache)),
+                FileObject::open(&Self::path_of_sst_static(path, sst_id))?,
+            )?;
+            state.sstables.insert(sst_id, Arc::new(sst));
+        }
+        if let CompactionOptions::Leveled(_) = options.compaction_options {
+            for idx in 0..state.levels.len() {
+                let mut level_arrange = state.levels[idx].1.clone();
+                level_arrange.sort_by(|a, b| {
+                    state
+                        .sstables
+                        .get(a)
+                        .unwrap()
+                        .first_key()
+                        .cmp(state.sstables.get(b).unwrap().first_key())
+                });
+                state.levels[idx].1 = level_arrange;
+            }
+        }
+
         let storage = Self {
             state: Arc::new(RwLock::new(Arc::new(state))),
             state_lock: Mutex::new(()),
             path: path.to_path_buf(),
-            block_cache: Arc::new(BlockCache::new(1024)),
-            next_sst_id: AtomicUsize::new(1),
+            block_cache,
+            next_sst_id: AtomicUsize::new(max_used_id + 1),
             compaction_controller,
-            manifest: None,
+            manifest: Some(manifest),
             options: options.into(),
             mvcc: None,
             compaction_filters: Arc::new(Mutex::new(Vec::new())),
@@ -420,7 +483,8 @@ impl LsmStorageInner {
     }
 
     pub(super) fn sync_dir(&self) -> Result<()> {
-        unimplemented!()
+        File::open(&self.path)?.sync_all()?;
+        Ok(())
     }
 
     /// Force freeze the current memtable to an immutable memtable
@@ -457,7 +521,7 @@ impl LsmStorageInner {
             self.path_of_sst(imm_memtable.id()),
         )?;
         {
-            let _lock = self.state_lock.lock();
+            let lock = self.state_lock.lock();
             let mut guard = self.state.write();
             let mut snapshot = guard.as_ref().clone();
             snapshot.imm_memtables.pop();
@@ -475,6 +539,12 @@ impl LsmStorageInner {
             );
             snapshot.sstables.insert(sst.sst_id(), Arc::new(sst));
             *guard = Arc::new(snapshot);
+
+            self.sync_dir()?;
+            self.manifest
+                .as_ref()
+                .unwrap()
+                .add_record(&lock, ManifestRecord::Flush(imm_memtable.id()))?;
         }
         Ok(())
     }

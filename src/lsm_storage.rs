@@ -14,8 +14,9 @@ use parking_lot::{Mutex, MutexGuard, RwLock};
 
 use crate::block::Block;
 use crate::compact::{
-    CompactionController, CompactionOptions, LeveledCompactionController, LeveledCompactionOptions,
-    SimpleLeveledCompactionController, SimpleLeveledCompactionOptions, TieredCompactionController,
+    CompactionController, CompactionOptions, CompactionTask, LeveledCompactionController,
+    LeveledCompactionOptions, SimpleLeveledCompactionController, SimpleLeveledCompactionOptions,
+    TieredCompactionController,
 };
 use crate::iterators::concat_iterator::SstConcatIterator;
 use crate::iterators::merge_iterator::MergeIterator;
@@ -311,7 +312,17 @@ impl LsmStorageInner {
                     );
                     need_load_ids.retain(|e| !remove_ids.contains(e));
                     need_load_ids.append(&mut sorted_run_ids);
-                    state = new_state;
+                    match task {
+                        CompactionTask::Tiered(task) => {
+                            let prev_tier_len = task.tiers.len() + new_state.levels.len() - 1;
+                            state.levels.truncate(state.levels.len() - prev_tier_len);
+                            state.levels.extend(new_state.levels);
+                        }
+                        _ => {
+                            state.l0_sstables.retain(|e| !remove_ids.contains(e));
+                            state.levels = new_state.levels;
+                        }
+                    }
                 }
                 ManifestRecord::Flush(sst_id) => {
                     need_load_ids.push(sst_id);
@@ -327,6 +338,7 @@ impl LsmStorageInner {
         let max_used_id = need_load_ids.iter().copied().max().unwrap_or(0) + 1;
         state.memtable = Arc::new(MemTable::create(max_used_id));
         for sst_id in need_load_ids {
+            println!("Recovering load {}.sst", sst_id);
             let sst = SsTable::open(
                 sst_id,
                 Some(Arc::clone(&block_cache)),
@@ -336,8 +348,7 @@ impl LsmStorageInner {
         }
         if let CompactionOptions::Leveled(_) = options.compaction_options {
             for idx in 0..state.levels.len() {
-                let mut level_arrange = state.levels[idx].1.clone();
-                level_arrange.sort_by(|a, b| {
+                state.levels[idx].1.sort_by(|a, b| {
                     state
                         .sstables
                         .get(a)
@@ -345,7 +356,6 @@ impl LsmStorageInner {
                         .first_key()
                         .cmp(state.sstables.get(b).unwrap().first_key())
                 });
-                state.levels[idx].1 = level_arrange;
             }
         }
 

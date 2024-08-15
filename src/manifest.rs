@@ -3,7 +3,8 @@ use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::{Ok, Result};
+use anyhow::{bail, Ok, Result};
+use bytes::{Buf, BufMut};
 use parking_lot::{Mutex, MutexGuard};
 use serde::{Deserialize, Serialize};
 
@@ -41,9 +42,20 @@ impl Manifest {
             .open(path.as_ref())?;
         let mut buf = Vec::new();
         file.read_to_end(&mut buf)?;
+        let mut buf = &buf[..];
         let mut manifest_records = Vec::new();
-        for record in serde_json::Deserializer::from_slice(&buf).into_iter::<ManifestRecord>() {
-            manifest_records.push(record?);
+        while buf.has_remaining() {
+            let len = buf.get_u16() as usize;
+            let json_bytes = buf.copy_to_bytes(len);
+            if crc32fast::hash(&json_bytes) != buf.get_u32() {
+                bail!("{:?} manifest has corrupted", path.as_ref());
+            }
+            manifest_records.push(
+                serde_json::Deserializer::from_slice(&json_bytes)
+                    .into_iter::<ManifestRecord>()
+                    .next()
+                    .unwrap()?,
+            )
         }
         Ok((
             Self {
@@ -63,7 +75,15 @@ impl Manifest {
 
     pub fn add_record_when_init(&self, record: ManifestRecord) -> Result<()> {
         let mut file = self.file.lock();
-        file.write_all(&serde_json::to_vec(&record)?)?;
+        let content = {
+            let json_bytes = serde_json::to_vec(&record)?;
+            let mut content = Vec::new();
+            content.put_u16(json_bytes.len() as u16);
+            content.put(&json_bytes[..]);
+            content.put_u32(crc32fast::hash(&json_bytes));
+            content
+        };
+        file.write_all(&content)?;
         file.sync_all()?;
         Ok(())
     }

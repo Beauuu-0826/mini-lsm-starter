@@ -35,25 +35,32 @@ impl BlockMeta {
     /// You may add extra fields to the buffer,
     /// in order to help keep track of `first_key` when decoding from the same buffer in the future.
     pub fn encode_block_meta(block_meta: &[BlockMeta], buf: &mut Vec<u8>) {
+        let mut bytes = Vec::new();
         for meta_data in block_meta {
-            buf.put_u32(meta_data.offset as u32);
-            buf.put_u16(meta_data.first_key.len() as u16);
-            buf.put(meta_data.first_key.raw_ref());
-            buf.put_u16(meta_data.last_key.len() as u16);
-            buf.put(meta_data.last_key.raw_ref());
+            bytes.put_u32(meta_data.offset as u32);
+            bytes.put_u16(meta_data.first_key.len() as u16);
+            bytes.put(meta_data.first_key.raw_ref());
+            bytes.put_u16(meta_data.last_key.len() as u16);
+            bytes.put(meta_data.last_key.raw_ref());
         }
+        bytes.put_u32(crc32fast::hash(&bytes));
+        buf.extend(bytes);
     }
 
     /// Decode block meta from a buffer.
     pub fn decode_block_meta(buf: impl Buf) -> Vec<BlockMeta> {
         let mut metas = Vec::new();
         let mut buf = buf;
-        while buf.has_remaining() {
-            let offset = buf.get_u32() as usize;
-            let fkey_len = buf.get_u16() as usize;
-            let first_key = buf.copy_to_bytes(fkey_len);
-            let lkey_len = buf.get_u16() as usize;
-            let last_key = buf.copy_to_bytes(lkey_len);
+        let mut bytes = buf.copy_to_bytes(buf.remaining() - 4);
+        if crc32fast::hash(&bytes) != buf.get_u32() {
+            panic!("Block meta data has corrupted");
+        }
+        while bytes.has_remaining() {
+            let offset = bytes.get_u32() as usize;
+            let fkey_len = bytes.get_u16() as usize;
+            let first_key = bytes.copy_to_bytes(fkey_len);
+            let lkey_len = bytes.get_u16() as usize;
+            let last_key = bytes.copy_to_bytes(lkey_len);
             metas.push(BlockMeta {
                 offset,
                 first_key: KeyBytes::from_bytes(first_key),
@@ -183,9 +190,13 @@ impl SsTable {
         } else {
             self.block_meta[block_idx + 1].offset
         } as u64;
-        Ok(Arc::new(Block::decode(
-            &self.file.read(start_index, end_index - start_index)?[..],
-        )))
+
+        let mut bytes_with_checksum = &self.file.read(start_index, end_index - start_index)?[..];
+        let block_bytes = bytes_with_checksum.copy_to_bytes(bytes_with_checksum.len() - 4);
+        if crc32fast::hash(&block_bytes) != bytes_with_checksum.get_u32() {
+            bail!("{}.sst' block has corrupted", self.id);
+        }
+        Ok(Arc::new(Block::decode(&block_bytes)))
     }
 
     /// Read a block from disk, with block cache. (Day 4)

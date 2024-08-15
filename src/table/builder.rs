@@ -60,7 +60,10 @@ impl SsTableBuilder {
             first_key,
             last_key,
         });
-        self.data.put(block.encode());
+        let bytes = block.encode();
+        let checksum = crc32fast::hash(&bytes);
+        self.data.put(bytes);
+        self.data.put_u32(checksum);
         let _ = self.builder.add(key, value);
     }
 
@@ -95,7 +98,10 @@ impl SsTableBuilder {
                 first_key,
                 last_key,
             });
+            let bytes = block.encode();
+            let checksum = crc32fast::hash(&bytes);
             data.put(block.encode());
+            data.put_u32(checksum);
         }
 
         let mut encoded = Vec::new();

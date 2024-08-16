@@ -103,6 +103,8 @@ pub struct LsmStorageOptions {
     pub block_size: usize,
     // SST size in bytes, also the approximate memtable capacity limit
     pub target_sst_size: usize,
+    /// Manifest size limit
+    pub manifest_size: usize,
     // Maximum number of memtables in memory, flush to L0 when exceeding this limit
     pub num_memtable_limit: usize,
     pub compaction_options: CompactionOptions,
@@ -115,6 +117,7 @@ impl LsmStorageOptions {
         Self {
             block_size: 4096,
             target_sst_size: 2 << 20,
+            manifest_size: 2 << 10,
             compaction_options: CompactionOptions::NoCompaction,
             enable_wal: false,
             num_memtable_limit: 50,
@@ -126,6 +129,7 @@ impl LsmStorageOptions {
         Self {
             block_size: 4096,
             target_sst_size: 2 << 20,
+            manifest_size: 2 << 10,
             compaction_options: CompactionOptions::NoCompaction,
             enable_wal: false,
             num_memtable_limit: 2,
@@ -137,6 +141,7 @@ impl LsmStorageOptions {
         Self {
             block_size: 4096,
             target_sst_size: 1 << 20, // 1MB
+            manifest_size: 2 << 10,
             compaction_options,
             enable_wal: false,
             num_memtable_limit: 2,
@@ -175,6 +180,10 @@ pub struct MiniLsm {
     compaction_notifier: crossbeam_channel::Sender<()>,
     /// The handle for the compaction thread. (In week 2)
     compaction_thread: Mutex<Option<std::thread::JoinHandle<()>>>,
+    /// Notifies the manifest compaction thread to stop working.
+    manifest_compaction_notifer: crossbeam_channel::Sender<()>,
+    /// The handle for the manifest compaction thread.
+    manifest_compaction_thread: Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 
 impl Drop for MiniLsm {
@@ -189,6 +198,7 @@ impl MiniLsm {
         // TODO no need to gain lock here?
         self.compaction_notifier.send(()).ok();
         self.flush_notifier.send(()).ok();
+        self.manifest_compaction_notifer.send(()).ok();
 
         // Waiting for current compaction and flush to completed
         self.compaction_thread
@@ -198,6 +208,12 @@ impl MiniLsm {
             .join()
             .map_err(|e| anyhow!("{:?}", e))?;
         self.flush_thread
+            .lock()
+            .take()
+            .unwrap()
+            .join()
+            .map_err(|e| anyhow!("{:?}", e))?;
+        self.manifest_compaction_thread
             .lock()
             .take()
             .unwrap()
@@ -227,12 +243,16 @@ impl MiniLsm {
         let compaction_thread = inner.spawn_compaction_thread(rx)?;
         let (tx2, rx) = crossbeam_channel::unbounded();
         let flush_thread = inner.spawn_flush_thread(rx)?;
+        let (tx3, rx) = crossbeam_channel::unbounded();
+        let manifest_compaction_thread = inner.spawn_manifest_compaction_thread(rx)?;
         Ok(Arc::new(Self {
             inner,
             flush_notifier: tx2,
             flush_thread: Mutex::new(flush_thread),
             compaction_notifier: tx1,
             compaction_thread: Mutex::new(compaction_thread),
+            manifest_compaction_notifer: tx3,
+            manifest_compaction_thread: Mutex::new(manifest_compaction_thread),
         }))
     }
 
@@ -354,27 +374,48 @@ impl LsmStorageInner {
                 ManifestRecord::NewMemtable(id) => {
                     memtable_ids.insert(0, id);
                 }
+                ManifestRecord::Snapshot(memtables, l0_sstables, levels) => {
+                    memtable_ids = memtables;
+                    state.l0_sstables = l0_sstables;
+                    state.levels = levels;
+                    need_load_ids.clear();
+                    need_load_ids.extend(state.l0_sstables.iter());
+                    state
+                        .levels
+                        .iter()
+                        .for_each(|(_, level)| need_load_ids.extend(level.iter()));
+                }
             }
         }
-        let max_used_id = max(
+        let mut max_used_id = max(
             need_load_ids.iter().copied().max().unwrap_or(0),
             memtable_ids.iter().copied().max().unwrap_or(0),
-        ) + 1;
+        );
         if options.enable_wal {
-            state.memtable = Arc::new(MemTable::create_with_wal(
-                max_used_id,
-                Self::path_of_wal_static(path, max_used_id),
-            )?);
-            // write manifest record
-            File::open(path)?.sync_all()?;
-            manifest.add_record_when_init(ManifestRecord::NewMemtable(max_used_id))?;
+            if let Some(id) = memtable_ids.first() {
+                println!("Recovering load memtable with id={}", id);
+                state.memtable = Arc::new(MemTable::recover_from_wal(
+                    *id,
+                    Self::path_of_wal_static(path, *id),
+                )?);
+            } else {
+                max_used_id += 1;
+                state.memtable = Arc::new(MemTable::create_with_wal(
+                    max_used_id,
+                    Self::path_of_wal_static(path, max_used_id),
+                )?);
+                // write manifest record
+                File::open(path)?.sync_all()?;
+                manifest.add_record_when_init(ManifestRecord::NewMemtable(max_used_id))?;
+            }
         } else {
+            max_used_id += 1;
             state.memtable = Arc::new(MemTable::create(max_used_id));
         }
 
         // recovery memtable
-        for id in memtable_ids {
-            println!("Recovering load memtable with id={}", id);
+        for id in memtable_ids.into_iter().skip(1) {
+            println!("Recovering load immutalbe memtable with id={}", id);
             state
                 .imm_memtables
                 .push(Arc::new(MemTable::recover_from_wal(

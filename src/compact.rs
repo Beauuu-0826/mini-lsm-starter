@@ -18,6 +18,7 @@ use crate::iterators::two_merge_iterator::TwoMergeIterator;
 use crate::iterators::StorageIterator;
 use crate::key::KeySlice;
 use crate::lsm_storage::{LsmStorageInner, LsmStorageState};
+use crate::manifest::ManifestRecord;
 use crate::table::{SsTable, SsTableBuilder};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -377,6 +378,69 @@ impl LsmStorageInner {
                 crossbeam_channel::select! {
                     recv(ticker) -> _ => if let Err(e) = this.trigger_flush() {
                         eprintln!("flush failed: {}", e);
+                    },
+                    recv(rx) -> _ => return
+                }
+            }
+        });
+        Ok(Some(handle))
+    }
+
+    fn trigger_manifest_compaction(&self) -> Result<()> {
+        if self
+            .manifest
+            .as_ref()
+            .unwrap()
+            .size()?
+            .gt(&self.options.manifest_size)
+        {
+            let state_lock = self.state_lock.lock();
+            if self
+                .manifest
+                .as_ref()
+                .unwrap()
+                .size()?
+                .gt(&self.options.manifest_size)
+            {
+                println!("Start to compact manifest");
+                let snapshot = {
+                    let state = {
+                        let guard = self.state.read();
+                        Arc::clone(&guard)
+                    };
+                    let mut memtables: Vec<usize> = state
+                        .imm_memtables
+                        .iter()
+                        .map(|memtable| memtable.id())
+                        .collect();
+                    memtables.insert(0, state.memtable.id());
+                    ManifestRecord::Snapshot(
+                        memtables,
+                        state.l0_sstables.clone(),
+                        state.levels.clone(),
+                    )
+                };
+                self.manifest
+                    .as_ref()
+                    .unwrap()
+                    .add_record(&state_lock, snapshot)?;
+                println!("Finish manifest compaction");
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn spawn_manifest_compaction_thread(
+        self: &Arc<Self>,
+        rx: crossbeam_channel::Receiver<()>,
+    ) -> Result<Option<std::thread::JoinHandle<()>>> {
+        let this = self.clone();
+        let handle = std::thread::spawn(move || {
+            let ticker = crossbeam_channel::tick(Duration::from_secs(1));
+            loop {
+                crossbeam_channel::select! {
+                    recv(ticker) -> _ => if let Err(e) = this.trigger_manifest_compaction() {
+                        eprintln!("compact manifest failed: {}", e);
                     },
                     recv(rx) -> _ => return
                 }

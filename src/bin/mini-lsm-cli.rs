@@ -319,6 +319,7 @@ fn main() -> Result<()> {
         LsmStorageOptions {
             block_size: 4096,
             target_sst_size: 2 << 20, // 2MB
+            manifest_size: 2 << 10,
             num_memtable_limit: 3,
             compaction_options: match args.compaction {
                 CompactionStrategy::None => CompactionOptions::NoCompaction,

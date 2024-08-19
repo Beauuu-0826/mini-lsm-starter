@@ -46,17 +46,17 @@ impl StorageIterator for LsmIterator {
         }
         match &self.end_bound {
             Bound::Included(key_bytes) => {
-                self.inner.key().raw_ref().cmp(key_bytes) != Ordering::Greater
+                self.inner.key().key_ref().cmp(key_bytes) != Ordering::Greater
             }
             Bound::Excluded(key_bytes) => {
-                self.inner.key().raw_ref().cmp(key_bytes) == Ordering::Less
+                self.inner.key().key_ref().cmp(key_bytes) == Ordering::Less
             }
             _ => true,
         }
     }
 
     fn key(&self) -> &[u8] {
-        self.inner.key().raw_ref()
+        self.inner.key().key_ref()
     }
 
     fn value(&self) -> &[u8] {

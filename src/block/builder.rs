@@ -48,22 +48,23 @@ impl BlockBuilder {
         let approximate_block_size = self.data.len()
             + self.offsets.len() * 2
             + 2
-            + (key.len() - overlap_len(key.raw_ref(), self.first_key.raw_ref()))
+            + (key.key_len() - overlap_len(key.key_ref(), self.first_key.key_ref()))
             + value.len()
-            + 10;
+            + 18;
         if approximate_block_size.gt(&self.block_size) && !self.is_empty() {
             return false;
         }
 
         self.offsets.push(self.data.len() as u16);
-        let overlap_len = overlap_len(self.first_key.raw_ref(), key.raw_ref());
+        let overlap_len = overlap_len(self.first_key.key_ref(), key.key_ref());
         self.data.put_u16(overlap_len as u16);
-        self.data.put_u16((key.len() - overlap_len) as u16);
-        self.data.put(&key.raw_ref()[overlap_len..]);
+        self.data.put_u16((key.key_len() - overlap_len) as u16);
+        self.data.put(&key.key_ref()[overlap_len..]);
+        self.data.put_u64(key.ts());
         self.data.put_u16(value.len() as u16);
         self.data.put(value);
         if self.first_key.is_empty() {
-            self.first_key.append(key.raw_ref());
+            self.first_key.append(key.key_ref());
         }
         self.last_key.set_from_slice(key);
         true
@@ -83,10 +84,16 @@ impl BlockBuilder {
     }
 
     pub fn first_key(&self) -> KeyBytes {
-        KeyBytes::from_bytes(Bytes::copy_from_slice(self.first_key.raw_ref()))
+        KeyBytes::from_bytes_with_ts(
+            Bytes::copy_from_slice(self.first_key.key_ref()),
+            self.first_key.ts(),
+        )
     }
 
     pub fn last_key(&self) -> KeyBytes {
-        KeyBytes::from_bytes(Bytes::copy_from_slice(self.last_key.raw_ref()))
+        KeyBytes::from_bytes_with_ts(
+            Bytes::copy_from_slice(self.last_key.key_ref()),
+            self.last_key.ts(),
+        )
     }
 }

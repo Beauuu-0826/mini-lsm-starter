@@ -15,7 +15,7 @@ use farmhash::fingerprint32;
 pub use iterator::SsTableIterator;
 
 use crate::block::Block;
-use crate::key::{KeyBytes, KeySlice};
+use crate::key::{KeyBytes, KeySlice, TS_DEFAULT};
 use crate::lsm_storage::BlockCache;
 
 use self::bloom::Bloom;
@@ -38,10 +38,12 @@ impl BlockMeta {
         let mut bytes = Vec::new();
         for meta_data in block_meta {
             bytes.put_u32(meta_data.offset as u32);
-            bytes.put_u16(meta_data.first_key.len() as u16);
-            bytes.put(meta_data.first_key.raw_ref());
-            bytes.put_u16(meta_data.last_key.len() as u16);
-            bytes.put(meta_data.last_key.raw_ref());
+            bytes.put_u16(meta_data.first_key.key_len() as u16);
+            bytes.put(meta_data.first_key.key_ref());
+            bytes.put_u64(meta_data.first_key.ts());
+            bytes.put_u16(meta_data.last_key.key_len() as u16);
+            bytes.put(meta_data.last_key.key_ref());
+            bytes.put_u64(meta_data.last_key.ts());
         }
         bytes.put_u32(crc32fast::hash(&bytes));
         buf.extend(bytes);
@@ -59,12 +61,14 @@ impl BlockMeta {
             let offset = bytes.get_u32() as usize;
             let fkey_len = bytes.get_u16() as usize;
             let first_key = bytes.copy_to_bytes(fkey_len);
+            let first_key_ts = bytes.get_u64();
             let lkey_len = bytes.get_u16() as usize;
             let last_key = bytes.copy_to_bytes(lkey_len);
+            let last_key_ts = bytes.get_u64();
             metas.push(BlockMeta {
                 offset,
-                first_key: KeyBytes::from_bytes(first_key),
-                last_key: KeyBytes::from_bytes(last_key),
+                first_key: KeyBytes::from_bytes_with_ts(first_key, first_key_ts),
+                last_key: KeyBytes::from_bytes_with_ts(last_key, last_key_ts),
             })
         }
         metas
@@ -221,7 +225,7 @@ impl SsTable {
     pub fn find_block_idx(&self, key: KeySlice) -> usize {
         let mut start_index = 0;
         let mut end_index = self.block_meta.len() - 1;
-        let mut idx_key = (0, KeySlice::from_slice(b""));
+        let mut idx_key = (0, KeySlice::from_slice(b"", TS_DEFAULT));
         while start_index <= end_index {
             idx_key = {
                 let idx = (start_index + end_index) / 2;
@@ -283,23 +287,19 @@ impl SsTable {
         self.max_ts
     }
 
-    pub fn may_contain(&self, key: KeyBytes) -> bool {
-        if self.first_key > key || self.last_key < key {
+    pub fn may_contain(&self, key: &[u8]) -> bool {
+        if self.first_key.key_ref() > key || self.last_key.key_ref() < key {
             return false;
         }
         return self.bloom.is_none()
-            || self
-                .bloom
-                .as_ref()
-                .unwrap()
-                .may_contain(fingerprint32(key.raw_ref()));
+            || self.bloom.as_ref().unwrap().may_contain(fingerprint32(key));
     }
 
     pub fn range_overlap<R>(&self, range: R) -> bool
     where
         R: RangeBounds<Bytes>,
     {
-        range.contains(&Bytes::copy_from_slice(self.first_key.raw_ref()))
-            || range.contains(&Bytes::copy_from_slice(self.last_key.raw_ref()))
+        range.contains(&Bytes::copy_from_slice(self.first_key.key_ref()))
+            || range.contains(&Bytes::copy_from_slice(self.last_key.key_ref()))
     }
 }

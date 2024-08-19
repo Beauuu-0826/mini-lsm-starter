@@ -37,7 +37,7 @@ impl SstConcatIterator {
     pub fn create_and_seek_to_key(sstables: Vec<Arc<SsTable>>, key: KeySlice) -> Result<Self> {
         let mut pick = sstables.len();
         for (idx, sst) in sstables.iter().enumerate() {
-            if sst.last_key().raw_ref().cmp(key.raw_ref()) != Ordering::Less {
+            if sst.last_key().as_key_slice().cmp(&key) != Ordering::Less {
                 pick = idx;
                 break;
             }

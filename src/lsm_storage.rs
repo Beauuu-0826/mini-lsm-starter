@@ -23,7 +23,7 @@ use crate::iterators::concat_iterator::SstConcatIterator;
 use crate::iterators::merge_iterator::MergeIterator;
 use crate::iterators::two_merge_iterator::TwoMergeIterator;
 use crate::iterators::StorageIterator;
-use crate::key::{KeyBytes, KeySlice};
+use crate::key::{KeySlice, TS_RANGE_BEGIN};
 use crate::lsm_iterator::{FusedIterator, LsmIterator};
 use crate::manifest::{Manifest, ManifestRecord};
 use crate::mem_table::{map_bound, MemTable};
@@ -506,10 +506,10 @@ impl LsmStorageInner {
 
         let mut sst_iters = Vec::with_capacity(state.l0_sstables.len());
         for sst in state.retrieve_sstable(&state.l0_sstables) {
-            if sst.may_contain(KeyBytes::from_bytes(Bytes::copy_from_slice(key))) {
+            if sst.may_contain(key) {
                 sst_iters.push(Box::new(SsTableIterator::create_and_seek_to_key(
                     sst,
-                    KeySlice::from_slice(key),
+                    KeySlice::from_slice(key, TS_RANGE_BEGIN),
                 )?));
             }
         }
@@ -520,18 +520,16 @@ impl LsmStorageInner {
                 state
                     .retrieve_sstable(sst_ids)
                     .into_iter()
-                    .filter(|sst| {
-                        sst.may_contain(KeyBytes::from_bytes(Bytes::copy_from_slice(key)))
-                    })
+                    .filter(|sst| sst.may_contain(key))
                     .collect(),
-                KeySlice::from_slice(key),
+                KeySlice::from_slice(key, TS_RANGE_BEGIN),
             )?));
         }
         let iterator = TwoMergeIterator::create(
             MergeIterator::create(sst_iters),
             MergeIterator::create(concat_iters),
         )?;
-        if iterator.is_valid() && iterator.key().raw_ref() == key && !iterator.value().is_empty() {
+        if iterator.is_valid() && iterator.key().key_ref() == key && !iterator.value().is_empty() {
             return Ok(Some(Bytes::copy_from_slice(iterator.value())));
         }
         Ok(None)

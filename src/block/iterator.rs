@@ -122,15 +122,19 @@ impl BlockIterator {
             .copied()
             .map(|end| end as usize)
             .unwrap_or_else(|| self.block.data.len());
-        let (overlap_len, rest_len, val_len) = {
+        let (overlap_len, rest_len, ts, val_len) = {
             let overlap_len = (&self.block.data[start_index..start_index + 2]).get_u16() as usize;
             let rest_len = (&self.block.data[start_index + 2..start_index + 4]).get_u16() as usize;
-            let val_len = (&self.block.data[start_index + 4 + rest_len..start_index + 6 + rest_len])
+            let ts = (&self.block.data[start_index + 4 + rest_len..start_index + 12 + rest_len])
+                .get_u64();
+            let val_len = (&self.block.data
+                [start_index + 12 + rest_len..start_index + 14 + rest_len])
                 .get_u16() as usize;
-            (overlap_len, rest_len, val_len)
+            (overlap_len, rest_len, ts, val_len)
         };
         self.key.set_from_slice(KeySlice::from_slice(
-            &self.first_key.raw_ref()[0..overlap_len],
+            &self.first_key.key_ref()[0..overlap_len],
+            ts,
         ));
         self.key
             .append(&self.block.data[start_index + 4..start_index + 4 + rest_len]);

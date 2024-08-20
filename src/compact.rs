@@ -179,7 +179,7 @@ impl LsmStorageInner {
     fn build_sorted_run<I>(
         &self,
         iterator: &mut I,
-        ignore_deleted: bool,
+        _ignore_deleted: bool,
     ) -> Result<Vec<Arc<SsTable>>>
     where
         I: for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>,
@@ -188,15 +188,13 @@ impl LsmStorageInner {
         let mut sst_builder = Some(SsTableBuilder::new(self.options.block_size));
         let mut sorted_run = Vec::new();
         while iterator.is_valid() {
-            if ignore_deleted && iterator.value().is_empty() {
-                iterator.next()?;
-                continue;
-            }
             let builder_inner = sst_builder.as_mut().unwrap();
             builder_inner.add(iterator.key(), iterator.value());
+            iterator.next()?;
             if builder_inner
                 .estimated_size()
                 .gt(&self.options.target_sst_size)
+                && (!iterator.is_valid() || builder_inner.last_key() != iterator.key().key_ref())
             {
                 let sst_id = self.next_sst_id();
                 sorted_run.push(Arc::new(sst_builder.take().unwrap().build(
@@ -206,7 +204,6 @@ impl LsmStorageInner {
                 )?));
                 sst_builder = Some(SsTableBuilder::new(self.options.block_size));
             }
-            iterator.next()?;
         }
 
         if !sst_builder.as_ref().unwrap().is_empty() {

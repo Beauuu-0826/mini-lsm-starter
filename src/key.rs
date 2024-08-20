@@ -157,6 +157,10 @@ impl<'a> Key<&'a [u8]> {
     pub fn for_testing_from_slice_with_ts(slice: &'a [u8], ts: u64) -> Self {
         Self(slice, ts)
     }
+
+    pub fn into_key_bytes(&self) -> KeyBytes {
+        KeyBytes::from_bytes_with_ts(Bytes::copy_from_slice(self.0), self.1)
+    }
 }
 
 impl<T: AsRef<[u8]> + Debug> Debug for Key<T> {

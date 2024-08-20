@@ -1,13 +1,13 @@
 use std::{cmp::Ordering, ops::Bound};
 
 use anyhow::{bail, Result};
-use bytes::Bytes;
 
 use crate::{
     iterators::{
         concat_iterator::SstConcatIterator, merge_iterator::MergeIterator,
         two_merge_iterator::TwoMergeIterator, StorageIterator,
     },
+    key::KeyBytes,
     mem_table::MemTableIterator,
     table::SsTableIterator,
 };
@@ -21,11 +21,11 @@ type LsmIteratorInner = TwoMergeIterator<
 pub struct LsmIterator {
     inner: LsmIteratorInner,
 
-    end_bound: Bound<Bytes>,
+    end_bound: Bound<KeyBytes>,
 }
 
 impl LsmIterator {
-    pub(crate) fn new(iter: LsmIteratorInner, end_bound: Bound<Bytes>) -> Result<Self> {
+    pub(crate) fn new(iter: LsmIteratorInner, end_bound: Bound<KeyBytes>) -> Result<Self> {
         let mut iter = Self {
             inner: iter,
             end_bound,
@@ -46,10 +46,10 @@ impl StorageIterator for LsmIterator {
         }
         match &self.end_bound {
             Bound::Included(key_bytes) => {
-                self.inner.key().key_ref().cmp(key_bytes) != Ordering::Greater
+                self.inner.key().into_key_bytes().cmp(key_bytes) != Ordering::Greater
             }
             Bound::Excluded(key_bytes) => {
-                self.inner.key().key_ref().cmp(key_bytes) == Ordering::Less
+                self.inner.key().into_key_bytes().cmp(key_bytes) == Ordering::Less
             }
             _ => true,
         }
@@ -64,8 +64,12 @@ impl StorageIterator for LsmIterator {
     }
 
     fn next(&mut self) -> Result<()> {
+        let mut prev_key = self.inner.key().into_key_bytes();
         self.inner.next()?;
-        while self.inner.is_valid() && self.inner.value().is_empty() {
+        while self.inner.is_valid()
+            && (self.inner.value().is_empty() || self.inner.key().key_ref() == prev_key.key_ref())
+        {
+            prev_key = self.inner.key().into_key_bytes();
             self.inner.next()?;
         }
         Ok(())

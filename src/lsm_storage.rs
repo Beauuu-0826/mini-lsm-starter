@@ -23,7 +23,7 @@ use crate::iterators::concat_iterator::SstConcatIterator;
 use crate::iterators::merge_iterator::MergeIterator;
 use crate::iterators::two_merge_iterator::TwoMergeIterator;
 use crate::iterators::StorageIterator;
-use crate::key::{KeySlice, TS_RANGE_BEGIN};
+use crate::key::{KeySlice, TS_RANGE_BEGIN, TS_RANGE_END};
 use crate::lsm_iterator::{FusedIterator, LsmIterator};
 use crate::manifest::{Manifest, ManifestRecord};
 use crate::mem_table::{map_bound, MemTable};
@@ -464,7 +464,7 @@ impl LsmStorageInner {
             compaction_controller,
             manifest: Some(manifest),
             options: options.into(),
-            mvcc: None,
+            mvcc: Some(LsmMvccInner::new(0)),
             compaction_filters: Arc::new(Mutex::new(Vec::new())),
         };
 
@@ -537,15 +537,23 @@ impl LsmStorageInner {
 
     /// Write a batch of data into the storage. Implement in week 2 day 7.
     pub fn write_batch<T: AsRef<[u8]>>(&self, batch: &[WriteBatchRecord<T>]) -> Result<()> {
+        let mvcc = self.mvcc.as_ref().unwrap();
+        let _mvcc_lock = mvcc.write_lock.lock();
+        let commit_ts = mvcc.latest_commit_ts() + 1;
         for record in batch {
             let should_freeze = {
                 let state = self.state.read();
                 match record {
                     WriteBatchRecord::Del(key) => {
-                        state.memtable.put(key.as_ref(), b"")?;
+                        state
+                            .memtable
+                            .put(KeySlice::from_slice(key.as_ref(), commit_ts), b"")?;
                     }
                     WriteBatchRecord::Put(key, value) => {
-                        state.memtable.put(key.as_ref(), value.as_ref())?;
+                        state.memtable.put(
+                            KeySlice::from_slice(key.as_ref(), commit_ts),
+                            value.as_ref(),
+                        )?;
                     }
                 }
                 state
@@ -566,6 +574,7 @@ impl LsmStorageInner {
                 }
             }
         }
+        mvcc.update_commit_ts(commit_ts);
         Ok(())
     }
 
@@ -632,6 +641,7 @@ impl LsmStorageInner {
 
     /// Force flush the earliest-created immutable memtable to disk
     pub fn force_flush_next_imm_memtable(&self) -> Result<()> {
+        let lock = self.state_lock.lock();
         if self.state.read().imm_memtables.is_empty() {
             return Ok(());
         }
@@ -649,7 +659,6 @@ impl LsmStorageInner {
             self.path_of_sst(imm_memtable.id()),
         )?;
         {
-            let lock = self.state_lock.lock();
             let mut guard = self.state.write();
             let mut snapshot = guard.as_ref().clone();
             snapshot.imm_memtables.pop();
@@ -674,6 +683,7 @@ impl LsmStorageInner {
                 .unwrap()
                 .add_record(&lock, ManifestRecord::Flush(imm_memtable.id()))?;
         }
+        drop(lock);
 
         if self.path_of_wal(imm_memtable.id()).exists() {
             std::fs::remove_file(self.path_of_wal(imm_memtable.id()))?;
@@ -696,6 +706,19 @@ impl LsmStorageInner {
             let guard = self.state.read();
             Arc::clone(&guard)
         };
+
+        // process lower and upper bound
+        let lower = match lower {
+            Bound::Included(x) => Bound::Included(KeySlice::from_slice(x, TS_RANGE_BEGIN)),
+            Bound::Excluded(x) => Bound::Excluded(KeySlice::from_slice(x, TS_RANGE_END)),
+            Bound::Unbounded => Bound::Unbounded,
+        };
+        let upper = match upper {
+            Bound::Included(x) => Bound::Included(KeySlice::from_slice(x, TS_RANGE_END)),
+            Bound::Excluded(x) => Bound::Excluded(KeySlice::from_slice(x, TS_RANGE_BEGIN)),
+            Bound::Unbounded => Bound::Unbounded,
+        };
+
         // Memtable iterators
         let mut iters = Vec::with_capacity(state.imm_memtables.len() + 1);
         iters.push(Box::new(state.memtable.scan(lower, upper)));
@@ -736,12 +759,16 @@ impl LsmStorageInner {
         match lower {
             Bound::Unbounded => (),
             Bound::Included(key) => {
-                while lsm_iterator.is_valid() && lsm_iterator.key().cmp(key) == Ordering::Less {
+                while lsm_iterator.is_valid()
+                    && lsm_iterator.key().cmp(key.key_ref()) == Ordering::Less
+                {
                     lsm_iterator.next()?;
                 }
             }
             Bound::Excluded(key) => {
-                while lsm_iterator.is_valid() && lsm_iterator.key().cmp(key) != Ordering::Greater {
+                while lsm_iterator.is_valid()
+                    && lsm_iterator.key().cmp(key.key_ref()) != Ordering::Greater
+                {
                     lsm_iterator.next()?;
                 }
             }

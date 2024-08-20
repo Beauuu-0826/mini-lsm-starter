@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use anyhow::{bail, Error, Result};
 pub use builder::SsTableBuilder;
-use bytes::{Buf, BufMut, Bytes};
+use bytes::{Buf, BufMut};
 use farmhash::fingerprint32;
 pub use iterator::SsTableIterator;
 
@@ -297,9 +297,8 @@ impl SsTable {
 
     pub fn range_overlap<R>(&self, range: R) -> bool
     where
-        R: RangeBounds<Bytes>,
+        R: RangeBounds<KeyBytes>,
     {
-        range.contains(&Bytes::copy_from_slice(self.first_key.key_ref()))
-            || range.contains(&Bytes::copy_from_slice(self.last_key.key_ref()))
+        range.contains(&self.first_key) || range.contains(&self.last_key)
     }
 }

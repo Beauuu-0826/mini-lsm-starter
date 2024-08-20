@@ -135,6 +135,10 @@ impl SsTableBuilder {
         })
     }
 
+    pub fn last_key(&self) -> &[u8] {
+        &self.last_key
+    }
+
     #[cfg(test)]
     pub(crate) fn build_for_test(self, path: impl AsRef<Path>) -> Result<SsTable> {
         self.build(0, None, path)

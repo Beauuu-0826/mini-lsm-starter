@@ -27,6 +27,7 @@ use crate::key::{KeySlice, TS_RANGE_BEGIN, TS_RANGE_END};
 use crate::lsm_iterator::{FusedIterator, LsmIterator};
 use crate::manifest::{Manifest, ManifestRecord};
 use crate::mem_table::{map_bound, MemTable};
+use crate::mvcc::txn::Transaction;
 use crate::mvcc::LsmMvccInner;
 use crate::table::{FileObject, SsTable, SsTableBuilder, SsTableIterator};
 
@@ -256,7 +257,7 @@ impl MiniLsm {
         }))
     }
 
-    pub fn new_txn(&self) -> Result<()> {
+    pub fn new_txn(&self) -> Result<Arc<Transaction>> {
         self.inner.new_txn()
     }
 
@@ -352,8 +353,9 @@ impl LsmStorageInner {
                     need_load_ids.append(&mut sorted_run_ids);
                     match task {
                         CompactionTask::Tiered(task) => {
-                            let prev_tier_len = task.tiers.len() + new_state.levels.len() - 1;
-                            state.levels.truncate(state.levels.len() - prev_tier_len);
+                            let keep_tier_len = state.levels.len()
+                                - (task.tiers.len() + new_state.levels.len() - 1);
+                            state.levels = state.levels.into_iter().take(keep_tier_len).collect();
                             state.levels.extend(new_state.levels);
                         }
                         _ => {
@@ -415,7 +417,7 @@ impl LsmStorageInner {
 
         // recovery memtable
         for id in memtable_ids.into_iter().skip(1) {
-            println!("Recovering load immutalbe memtable with id={}", id);
+            println!("Recovering load immutable memtable with id={}", id);
             state
                 .imm_memtables
                 .push(Arc::new(MemTable::recover_from_wal(
@@ -691,9 +693,8 @@ impl LsmStorageInner {
         Ok(())
     }
 
-    pub fn new_txn(&self) -> Result<()> {
-        // no-op
-        Ok(())
+    pub fn new_txn(self: &Arc<Self>) -> Result<Arc<Transaction>> {
+        Ok(self.mvcc.as_ref().unwrap().new_txn(self.clone(), false))
     }
 
     /// Create an iterator over a range of keys.

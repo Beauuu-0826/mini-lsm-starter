@@ -301,10 +301,9 @@ impl LsmStorageInner {
             // update levels depend on compaction task
             match &task {
                 CompactionTask::Tiered(task) => {
-                    let prev_tier_len = task.tiers.len() + lsm_storage_state.levels.len() - 1;
-                    snapshot
-                        .levels
-                        .truncate(snapshot.levels.len() - prev_tier_len);
+                    let keep_tier_len = snapshot.levels.len()
+                        - (task.tiers.len() + lsm_storage_state.levels.len() - 1);
+                    snapshot.levels = snapshot.levels.into_iter().take(keep_tier_len).collect();
                     snapshot.levels.extend(lsm_storage_state.levels);
                 }
                 _ => {

@@ -22,6 +22,7 @@ pub struct SsTableBuilder {
     pub(crate) meta: Vec<BlockMeta>,
     block_size: usize,
     key_hashs: Vec<u32>,
+    max_ts: u64,
 }
 
 impl SsTableBuilder {
@@ -37,6 +38,7 @@ impl SsTableBuilder {
             meta: Vec::new(),
             block_size,
             key_hashs: Vec::new(),
+            max_ts: 0,
         }
     }
 
@@ -53,6 +55,9 @@ impl SsTableBuilder {
         self.last_key.clear();
         self.last_key.put(key.key_ref());
         self.last_key_ts = key.ts();
+        if self.max_ts < key.ts() {
+            self.max_ts = key.ts();
+        }
 
         if self.builder.add(key, value) {
             return;
@@ -122,6 +127,7 @@ impl SsTableBuilder {
         let bloom_filter_offset = encoded.len();
         bloom_filter.encode(&mut encoded);
         encoded.put_u32(bloom_filter_offset as u32);
+        encoded.put_u64(self.max_ts);
         Ok(SsTable {
             file: FileObject::create(path.as_ref(), encoded)?,
             block_meta: meta,
@@ -131,7 +137,7 @@ impl SsTableBuilder {
             first_key: KeyVec::from_vec_with_ts(self.first_key, self.first_key_ts).into_key_bytes(),
             last_key: KeyVec::from_vec_with_ts(self.last_key, self.last_key_ts).into_key_bytes(),
             bloom: Some(bloom_filter),
-            max_ts: 0,
+            max_ts: self.max_ts,
         })
     }
 

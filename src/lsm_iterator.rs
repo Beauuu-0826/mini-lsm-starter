@@ -22,15 +22,24 @@ pub struct LsmIterator {
     inner: LsmIteratorInner,
 
     end_bound: Bound<KeyBytes>,
+
+    read_ts: u64,
 }
 
 impl LsmIterator {
-    pub(crate) fn new(iter: LsmIteratorInner, end_bound: Bound<KeyBytes>) -> Result<Self> {
+    pub(crate) fn new(
+        iter: LsmIteratorInner,
+        end_bound: Bound<KeyBytes>,
+        read_ts: u64,
+    ) -> Result<Self> {
         let mut iter = Self {
             inner: iter,
             end_bound,
+            read_ts,
         };
-        while iter.is_valid() && iter.value().is_empty() {
+        while iter.is_valid()
+            && (iter.inner.value().is_empty() || iter.inner.key().ts() > iter.read_ts)
+        {
             iter.next()?;
         }
         Ok(iter)
@@ -64,12 +73,20 @@ impl StorageIterator for LsmIterator {
     }
 
     fn next(&mut self) -> Result<()> {
-        let mut prev_key = self.inner.key().into_key_bytes();
+        let mut prev_key = if self.inner.key().ts() <= self.read_ts {
+            self.inner.key().into_key_bytes()
+        } else {
+            KeyBytes::new()
+        };
         self.inner.next()?;
         while self.inner.is_valid()
-            && (self.inner.value().is_empty() || self.inner.key().key_ref() == prev_key.key_ref())
+            && (self.inner.value().is_empty()
+                || self.inner.key().key_ref() == prev_key.key_ref()
+                || self.inner.key().ts() > self.read_ts)
         {
-            prev_key = self.inner.key().into_key_bytes();
+            if self.inner.key().ts() <= self.read_ts {
+                prev_key = self.inner.key().into_key_bytes();
+            }
             self.inner.next()?;
         }
         Ok(())

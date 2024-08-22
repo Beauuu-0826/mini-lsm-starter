@@ -5,6 +5,7 @@ use tempfile::tempdir;
 
 use crate::{
     compact::CompactionOptions,
+    iterators::StorageIterator,
     key::KeySlice,
     lsm_storage::{LsmStorageOptions, MiniLsm},
     table::SsTableBuilder,
@@ -28,6 +29,13 @@ fn test_task2_memtable_mvcc() {
     assert_eq!(snapshot1.get(b"a").unwrap(), Some(Bytes::from_static(b"1")));
     assert_eq!(snapshot1.get(b"b").unwrap(), Some(Bytes::from_static(b"1")));
     assert_eq!(snapshot1.get(b"c").unwrap(), None);
+
+    let mut iterator = snapshot1.scan(Bound::Unbounded, Bound::Unbounded).unwrap();
+    while iterator.is_valid() {
+        println!("Key: {:?}, Value: {:?}", iterator.key(), iterator.value());
+        iterator.next().unwrap();
+    }
+
     check_lsm_iter_result_by_key(
         &mut snapshot1.scan(Bound::Unbounded, Bound::Unbounded).unwrap(),
         vec![

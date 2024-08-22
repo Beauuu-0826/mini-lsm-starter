@@ -6,9 +6,10 @@ mod watermark;
 
 use std::{
     collections::{BTreeMap, HashSet},
-    sync::Arc,
+    sync::{atomic::AtomicBool, Arc},
 };
 
+use crossbeam_skiplist::SkipMap;
 use parking_lot::Mutex;
 
 use crate::lsm_storage::LsmStorageInner;
@@ -54,7 +55,13 @@ impl LsmMvccInner {
         ts.1.watermark().unwrap_or(ts.0)
     }
 
-    pub fn new_txn(&self, inner: Arc<LsmStorageInner>, serializable: bool) -> Arc<Transaction> {
-        unimplemented!()
+    pub fn new_txn(&self, inner: Arc<LsmStorageInner>, _serializable: bool) -> Arc<Transaction> {
+        Arc::new(Transaction {
+            read_ts: inner.mvcc.as_ref().unwrap().latest_commit_ts(),
+            inner,
+            local_storage: Arc::new(SkipMap::new()),
+            committed: Arc::new(AtomicBool::new(false)),
+            key_hashes: None,
+        })
     }
 }

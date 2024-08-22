@@ -74,7 +74,7 @@ impl MemTable {
     }
 
     pub fn for_testing_get_slice(&self, key: &[u8]) -> Option<Bytes> {
-        self.get(key)
+        self.get(key, TS_RANGE_BEGIN)
     }
 
     pub fn for_testing_scan_slice(
@@ -96,9 +96,9 @@ impl MemTable {
     }
 
     /// Get a value by key.
-    pub fn get(&self, key: &[u8]) -> Option<Bytes> {
+    pub fn get(&self, key: &[u8], read_ts: u64) -> Option<Bytes> {
         let iterator = self.scan(
-            Bound::Included(KeySlice::from_slice(key, TS_RANGE_BEGIN)),
+            Bound::Included(KeySlice::from_slice(key, read_ts)),
             Bound::Included(KeySlice::from_slice(key, TS_RANGE_END)),
         );
         if iterator.is_valid() {

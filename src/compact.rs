@@ -179,15 +179,31 @@ impl LsmStorageInner {
     fn build_sorted_run<I>(
         &self,
         iterator: &mut I,
-        _ignore_deleted: bool,
+        ignore_deleted: bool,
     ) -> Result<Vec<Arc<SsTable>>>
     where
         I: for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>,
     {
+        let watermark = self.mvcc.as_ref().unwrap().watermark();
+        let mut prev_ley_under_watermark = Vec::new();
         // consume the iterator adds key-value to sst_builder
         let mut sst_builder = Some(SsTableBuilder::new(self.options.block_size));
         let mut sorted_run = Vec::new();
         while iterator.is_valid() {
+            if iterator.key().ts() <= watermark {
+                if iterator.key().key_ref() == prev_ley_under_watermark {
+                    iterator.next()?;
+                    continue;
+                } else {
+                    prev_ley_under_watermark = Vec::from(iterator.key().key_ref());
+                }
+
+                if ignore_deleted && iterator.value().is_empty() {
+                    iterator.next()?;
+                    continue;
+                }
+            }
+
             let builder_inner = sst_builder.as_mut().unwrap();
             builder_inner.add(iterator.key(), iterator.value());
             iterator.next()?;

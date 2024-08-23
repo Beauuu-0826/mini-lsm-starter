@@ -2,7 +2,7 @@
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
 pub mod txn;
-mod watermark;
+pub mod watermark;
 
 use std::{
     collections::{BTreeMap, HashSet},
@@ -36,7 +36,7 @@ impl LsmMvccInner {
         Self {
             write_lock: Mutex::new(()),
             commit_lock: Mutex::new(()),
-            ts: Arc::new(Mutex::new((initial_ts, Watermark::new()))),
+            ts: Arc::new(Mutex::new((initial_ts, Watermark::default()))),
             committed_txns: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
@@ -56,12 +56,22 @@ impl LsmMvccInner {
     }
 
     pub fn new_txn(&self, inner: Arc<LsmStorageInner>, _serializable: bool) -> Arc<Transaction> {
+        let read_ts = {
+            let mut ts = self.ts.lock();
+            let read_ts = ts.0;
+            ts.1.add_reader(read_ts);
+            read_ts
+        };
         Arc::new(Transaction {
-            read_ts: inner.mvcc.as_ref().unwrap().latest_commit_ts(),
+            read_ts,
             inner,
             local_storage: Arc::new(SkipMap::new()),
             committed: Arc::new(AtomicBool::new(false)),
             key_hashes: None,
         })
+    }
+
+    pub fn remove_reader(&self, read_ts: u64) {
+        self.ts.lock().1.remove_reader(read_ts);
     }
 }

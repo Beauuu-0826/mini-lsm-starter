@@ -146,7 +146,7 @@ impl LsmStorageInner {
                 )
             }
             CompactionTask::Tiered(task) => {
-                let mut concat_iters = Vec::new();
+                let mut concat_iters = Vec::with_capacity(task.tiers.len());
                 for (_, sst_ids) in task.tiers.iter() {
                     concat_iters.push(Box::new(state.create_concat_iterator(sst_ids)?));
                 }

@@ -7,7 +7,7 @@ use std::{
     sync::{atomic::AtomicBool, Arc},
 };
 
-use anyhow::{Ok, Result};
+use anyhow::{bail, Ok, Result};
 use bytes::Bytes;
 use crossbeam_skiplist::SkipMap;
 use ouroboros::self_referencing;
@@ -16,7 +16,7 @@ use parking_lot::Mutex;
 use crate::{
     iterators::{two_merge_iterator::TwoMergeIterator, StorageIterator},
     lsm_iterator::{FusedIterator, LsmIterator},
-    lsm_storage::LsmStorageInner,
+    lsm_storage::{LsmStorageInner, WriteBatchRecord},
 };
 
 pub struct Transaction {
@@ -38,6 +38,10 @@ fn map_bound(bound: Bound<&[u8]>) -> Bound<Bytes> {
 
 impl Transaction {
     pub fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
+        if self.committed.load(std::sync::atomic::Ordering::SeqCst) {
+            bail!("This transaction has entered the commit phase");
+        }
+
         if let Some(entry) = self.local_storage.get(key) {
             if entry.value().is_empty() {
                 return Ok(None);
@@ -49,6 +53,10 @@ impl Transaction {
     }
 
     pub fn scan(self: &Arc<Self>, lower: Bound<&[u8]>, upper: Bound<&[u8]>) -> Result<TxnIterator> {
+        if self.committed.load(std::sync::atomic::Ordering::SeqCst) {
+            bail!("This transaction has entered the commit phase");
+        }
+
         let mut local_iterator = TxnLocalIteratorBuilder {
             map: self.local_storage.clone(),
             iter_builder: |map| map.range((map_bound(lower), map_bound(upper))),
@@ -64,15 +72,45 @@ impl Transaction {
     }
 
     pub fn put(&self, key: &[u8], value: &[u8]) {
-        unimplemented!()
+        if self.committed.load(std::sync::atomic::Ordering::SeqCst) {
+            panic!("This transaction has entered the commit phase");
+        }
+
+        self.local_storage
+            .insert(Bytes::copy_from_slice(key), Bytes::copy_from_slice(value));
     }
 
     pub fn delete(&self, key: &[u8]) {
-        unimplemented!()
+        if self.committed.load(std::sync::atomic::Ordering::SeqCst) {
+            panic!("This transaction has entered the commit phase");
+        }
+
+        self.local_storage
+            .insert(Bytes::copy_from_slice(key), Bytes::new());
     }
 
     pub fn commit(&self) -> Result<()> {
-        unimplemented!()
+        self.committed
+            .compare_exchange(
+                false,
+                true,
+                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::SeqCst,
+            )
+            .expect("The transaction has entered the commit phase");
+        let batch_record = self
+            .local_storage
+            .iter()
+            .map(|entry| {
+                if entry.value().is_empty() {
+                    WriteBatchRecord::Del(entry.key().clone())
+                } else {
+                    WriteBatchRecord::Put(entry.key().clone(), entry.value().clone())
+                }
+            })
+            .collect::<Vec<_>>();
+        self.inner.write_batch(&batch_record)?;
+        Ok(())
     }
 }
 
@@ -141,7 +179,7 @@ impl TxnIterator {
         txn: Arc<Transaction>,
         iter: TwoMergeIterator<TxnLocalIterator, FusedIterator<LsmIterator>>,
     ) -> Result<Self> {
-        unimplemented!()
+        Ok(Self { _txn: txn, iter })
     }
 }
 

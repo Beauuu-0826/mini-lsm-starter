@@ -28,9 +28,9 @@ impl Block {
     pub fn decode(data: &[u8]) -> Self {
         let num_of_elements = (&data[data.len() - 2..]).get_u16() as usize;
         let split_index = data.len() - 2 - num_of_elements * 2;
-        let mut datas = Vec::new();
+        let mut datas = Vec::with_capacity(split_index);
         datas.put(&data[..split_index]);
-        let mut offsets = Vec::new();
+        let mut offsets = Vec::with_capacity(num_of_elements);
         for i in 0..num_of_elements {
             let start_index = split_index + i * 2;
             offsets.push((&data[start_index..start_index + 2]).get_u16());

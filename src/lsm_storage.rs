@@ -104,7 +104,7 @@ impl LsmStorageState {
                 max_ts = sst.max_ts();
             }
         }
-        let mut memtable_iterators = Vec::new();
+        let mut memtable_iterators = Vec::with_capacity(self.imm_memtables.len() + 1);
         memtable_iterators.push(Box::new(
             self.memtable.scan(Bound::Unbounded, Bound::Unbounded),
         ));

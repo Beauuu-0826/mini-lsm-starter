@@ -286,7 +286,7 @@ fn test_task4_integration() {
     storage.put(b"3", b"233333").unwrap();
     {
         let mut iter = storage
-            .scan_for_test(Bound::Unbounded, Bound::Unbounded)
+            .scan_for_testing(Bound::Unbounded, Bound::Unbounded)
             .unwrap();
         println!("12345");
         check_lsm_iter_result_by_key(
@@ -305,7 +305,7 @@ fn test_task4_integration() {
     }
     {
         let mut iter = storage
-            .scan_for_test(Bound::Included(b"2"), Bound::Included(b"3"))
+            .scan_for_testing(Bound::Included(b"2"), Bound::Included(b"3"))
             .unwrap();
         println!("23456");
         check_lsm_iter_result_by_key(

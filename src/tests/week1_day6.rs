@@ -44,7 +44,7 @@ fn test_task1_storage_scan() {
 
     check_lsm_iter_result_by_key(
         &mut storage
-            .scan_for_test(Bound::Unbounded, Bound::Unbounded)
+            .scan_for_testing(Bound::Unbounded, Bound::Unbounded)
             .unwrap(),
         vec![
             (Bytes::from("0"), Bytes::from("2333333")),
@@ -55,13 +55,13 @@ fn test_task1_storage_scan() {
     );
     check_lsm_iter_result_by_key(
         &mut storage
-            .scan_for_test(Bound::Included(b"1"), Bound::Included(b"2"))
+            .scan_for_testing(Bound::Included(b"1"), Bound::Included(b"2"))
             .unwrap(),
         vec![(Bytes::from("2"), Bytes::from("2333"))],
     );
     check_lsm_iter_result_by_key(
         &mut storage
-            .scan_for_test(Bound::Excluded(b"1"), Bound::Excluded(b"3"))
+            .scan_for_testing(Bound::Excluded(b"1"), Bound::Excluded(b"3"))
             .unwrap(),
         vec![(Bytes::from("2"), Bytes::from("2333"))],
     );
@@ -99,24 +99,24 @@ fn test_task1_storage_get() {
     }
 
     assert_eq!(
-        storage.get_for_test(b"0").unwrap(),
+        storage.get_for_testing(b"0").unwrap(),
         Some(Bytes::from_static(b"2333333"))
     );
     assert_eq!(
-        storage.get_for_test(b"00").unwrap(),
+        storage.get_for_testing(b"00").unwrap(),
         Some(Bytes::from_static(b"2333"))
     );
     assert_eq!(
-        storage.get_for_test(b"2").unwrap(),
+        storage.get_for_testing(b"2").unwrap(),
         Some(Bytes::from_static(b"2333"))
     );
     assert_eq!(
-        storage.get_for_test(b"3").unwrap(),
+        storage.get_for_testing(b"3").unwrap(),
         Some(Bytes::from_static(b"23333"))
     );
-    assert_eq!(storage.get_for_test(b"4").unwrap(), None);
-    assert_eq!(storage.get_for_test(b"--").unwrap(), None);
-    assert_eq!(storage.get_for_test(b"555").unwrap(), None);
+    assert_eq!(storage.get_for_testing(b"4").unwrap(), None);
+    assert_eq!(storage.get_for_testing(b"--").unwrap(), None);
+    assert_eq!(storage.get_for_testing(b"555").unwrap(), None);
 }
 
 #[test]
@@ -154,7 +154,7 @@ fn test_task3_sst_filter() {
     }
 
     let iter = storage
-        .scan_for_test(Bound::Unbounded, Bound::Unbounded)
+        .scan_for_testing(Bound::Unbounded, Bound::Unbounded)
         .unwrap();
     assert!(
         iter.num_active_iterators() >= 10,
@@ -163,7 +163,7 @@ fn test_task3_sst_filter() {
     );
     let max_num = iter.num_active_iterators();
     let iter = storage
-        .scan_for_test(
+        .scan_for_testing(
             Bound::Excluded(format!("{:05}", 10000).as_bytes()),
             Bound::Unbounded,
         )
@@ -171,28 +171,28 @@ fn test_task3_sst_filter() {
     assert!(iter.num_active_iterators() < max_num);
     let min_num = iter.num_active_iterators();
     let iter = storage
-        .scan_for_test(
+        .scan_for_testing(
             Bound::Unbounded,
             Bound::Excluded(format!("{:05}", 1).as_bytes()),
         )
         .unwrap();
     assert_eq!(iter.num_active_iterators(), min_num);
     let iter = storage
-        .scan_for_test(
+        .scan_for_testing(
             Bound::Unbounded,
             Bound::Included(format!("{:05}", 0).as_bytes()),
         )
         .unwrap();
     assert_eq!(iter.num_active_iterators(), min_num);
     let iter = storage
-        .scan_for_test(
+        .scan_for_testing(
             Bound::Included(format!("{:05}", 10001).as_bytes()),
             Bound::Unbounded,
         )
         .unwrap();
     assert_eq!(iter.num_active_iterators(), min_num);
     let iter = storage
-        .scan_for_test(
+        .scan_for_testing(
             Bound::Included(format!("{:05}", 5000).as_bytes()),
             Bound::Excluded(format!("{:05}", 6000).as_bytes()),
         )

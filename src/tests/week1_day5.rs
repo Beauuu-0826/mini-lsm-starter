@@ -168,7 +168,7 @@ fn test_task2_storage_scan() {
     }
     check_lsm_iter_result_by_key(
         &mut storage
-            .scan_for_test(Bound::Unbounded, Bound::Unbounded)
+            .scan_for_testing(Bound::Unbounded, Bound::Unbounded)
             .unwrap(),
         vec![
             (Bytes::from("0"), Bytes::from("2333333")),
@@ -179,19 +179,19 @@ fn test_task2_storage_scan() {
     );
     check_lsm_iter_result_by_key(
         &mut storage
-            .scan_for_test(Bound::Included(b"1"), Bound::Included(b"2"))
+            .scan_for_testing(Bound::Included(b"1"), Bound::Included(b"2"))
             .unwrap(),
         vec![(Bytes::from("2"), Bytes::from("2333"))],
     );
     check_lsm_iter_result_by_key(
         &mut storage
-            .scan_for_test(Bound::Excluded(b"1"), Bound::Excluded(b"3"))
+            .scan_for_testing(Bound::Excluded(b"1"), Bound::Excluded(b"3"))
             .unwrap(),
         vec![(Bytes::from("2"), Bytes::from("2333"))],
     );
     check_lsm_iter_result_by_key(
         &mut storage
-            .scan_for_test(Bound::Included(b"0"), Bound::Included(b"1"))
+            .scan_for_testing(Bound::Included(b"0"), Bound::Included(b"1"))
             .unwrap(),
         vec![
             (Bytes::from_static(b"0"), Bytes::from_static(b"2333333")),
@@ -200,7 +200,7 @@ fn test_task2_storage_scan() {
     );
     check_lsm_iter_result_by_key(
         &mut storage
-            .scan_for_test(Bound::Excluded(b"0"), Bound::Included(b"1"))
+            .scan_for_testing(Bound::Excluded(b"0"), Bound::Included(b"1"))
             .unwrap(),
         vec![(Bytes::from("00"), Bytes::from("2333"))],
     );
@@ -245,22 +245,22 @@ fn test_task3_storage_get() {
         *state = snapshot.into();
     }
     assert_eq!(
-        storage.get_for_test(b"0").unwrap(),
+        storage.get_for_testing(b"0").unwrap(),
         Some(Bytes::from_static(b"2333333"))
     );
     assert_eq!(
-        storage.get_for_test(b"00").unwrap(),
+        storage.get_for_testing(b"00").unwrap(),
         Some(Bytes::from_static(b"2333"))
     );
     assert_eq!(
-        storage.get_for_test(b"2").unwrap(),
+        storage.get_for_testing(b"2").unwrap(),
         Some(Bytes::from_static(b"2333"))
     );
     assert_eq!(
-        storage.get_for_test(b"3").unwrap(),
+        storage.get_for_testing(b"3").unwrap(),
         Some(Bytes::from_static(b"23333"))
     );
-    assert_eq!(storage.get_for_test(b"4").unwrap(), None);
-    assert_eq!(storage.get_for_test(b"--").unwrap(), None);
-    assert_eq!(storage.get_for_test(b"555").unwrap(), None);
+    assert_eq!(storage.get_for_testing(b"4").unwrap(), None);
+    assert_eq!(storage.get_for_testing(b"--").unwrap(), None);
+    assert_eq!(storage.get_for_testing(b"555").unwrap(), None);
 }

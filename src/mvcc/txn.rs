@@ -1,6 +1,3 @@
-#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
-#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
-
 use std::{
     collections::HashSet,
     ops::Bound,
@@ -41,6 +38,9 @@ impl Transaction {
         if self.committed.load(std::sync::atomic::Ordering::SeqCst) {
             bail!("This transaction has entered the commit phase");
         }
+        if let Some(ref guard) = self.key_hashes {
+            guard.lock().1.insert(farmhash::hash32(key));
+        }
 
         if let Some(entry) = self.local_storage.get(key) {
             if entry.value().is_empty() {
@@ -75,18 +75,16 @@ impl Transaction {
         if self.committed.load(std::sync::atomic::Ordering::SeqCst) {
             panic!("This transaction has entered the commit phase");
         }
+        if let Some(ref guard) = self.key_hashes {
+            guard.lock().0.insert(farmhash::hash32(key));
+        }
 
         self.local_storage
             .insert(Bytes::copy_from_slice(key), Bytes::copy_from_slice(value));
     }
 
     pub fn delete(&self, key: &[u8]) {
-        if self.committed.load(std::sync::atomic::Ordering::SeqCst) {
-            panic!("This transaction has entered the commit phase");
-        }
-
-        self.local_storage
-            .insert(Bytes::copy_from_slice(key), Bytes::new());
+        self.put(key, b"");
     }
 
     pub fn commit(&self) -> Result<()> {
@@ -98,6 +96,16 @@ impl Transaction {
                 std::sync::atomic::Ordering::SeqCst,
             )
             .expect("The transaction has entered the commit phase");
+
+        // To ensure that only one transaction can enter into commit phase at a time
+        let mvcc = self.inner.mvcc.as_ref().unwrap();
+        let _commit_lock = mvcc.commit_lock.lock();
+        if let Some(ref guard) = self.key_hashes {
+            if !mvcc.serializable(self.read_ts, mvcc.latest_commit_ts() + 1, &guard.lock()) {
+                bail!("This transaction may embrace the serializable isolation, can't commit");
+            }
+        }
+
         let batch_record = self
             .local_storage
             .iter()
@@ -110,6 +118,15 @@ impl Transaction {
             })
             .collect::<Vec<_>>();
         self.inner.write_batch(&batch_record)?;
+
+        if let Some(ref guard) = self.key_hashes {
+            mvcc.maintain_commited_txn(
+                mvcc.latest_commit_ts(),
+                self.read_ts,
+                guard.lock().0.clone(),
+            );
+            mvcc.vacuum();
+        }
         Ok(())
     }
 }

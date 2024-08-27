@@ -288,7 +288,14 @@ impl MiniLsm {
     }
 
     pub fn write_batch<T: AsRef<[u8]>>(&self, batch: &[WriteBatchRecord<T>]) -> Result<()> {
-        self.inner.write_batch(batch)
+        let txn = self.new_txn()?;
+        for record in batch {
+            match record {
+                WriteBatchRecord::Del(key) => txn.delete(key.as_ref()),
+                WriteBatchRecord::Put(key, value) => txn.put(key.as_ref(), value.as_ref()),
+            }
+        }
+        txn.commit()
     }
 
     pub fn add_compaction_filter(&self, compaction_filter: CompactionFilter) {
@@ -301,11 +308,15 @@ impl MiniLsm {
     }
 
     pub fn put(&self, key: &[u8], value: &[u8]) -> Result<()> {
-        self.inner.put(key, value)
+        let txn = self.new_txn()?;
+        txn.put(key, value);
+        txn.commit()
     }
 
     pub fn delete(&self, key: &[u8]) -> Result<()> {
-        self.inner.delete(key)
+        let txn = self.new_txn()?;
+        txn.delete(key);
+        txn.commit()
     }
 
     pub fn sync(&self) -> Result<()> {
@@ -512,7 +523,7 @@ impl LsmStorageInner {
 
     /// Get a key from the storage. In day 7, this can be further optimized by using a bloom filter.
     /// Memtable -> Immutable Memtable -> L0 SsTable -> L1 SsTable
-    pub fn get_for_test(self: &Arc<Self>, key: &[u8]) -> Result<Option<Bytes>> {
+    pub fn get_for_testing(self: &Arc<Self>, key: &[u8]) -> Result<Option<Bytes>> {
         self.get(key, TS_RANGE_BEGIN)
     }
 
@@ -734,7 +745,7 @@ impl LsmStorageInner {
     }
 
     /// Create an iterator over a range of keys.
-    pub fn scan_for_test(
+    pub fn scan_for_testing(
         self: &Arc<Self>,
         lower: Bound<&[u8]>,
         upper: Bound<&[u8]>,

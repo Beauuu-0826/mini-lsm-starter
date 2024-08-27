@@ -220,7 +220,9 @@ fn test_task3_integration() {
     assert!(!storage.state.read().levels[0].1.is_empty());
 
     check_lsm_iter_result_by_key(
-        &mut storage.scan(Bound::Unbounded, Bound::Unbounded).unwrap(),
+        &mut storage
+            .scan_for_test(Bound::Unbounded, Bound::Unbounded)
+            .unwrap(),
         vec![
             (Bytes::from("0"), Bytes::from("2333333")),
             (Bytes::from("00"), Bytes::from("2333")),
@@ -230,22 +232,22 @@ fn test_task3_integration() {
     );
 
     assert_eq!(
-        storage.get(b"0").unwrap(),
+        storage.get_for_test(b"0").unwrap(),
         Some(Bytes::from_static(b"2333333"))
     );
     assert_eq!(
-        storage.get(b"00").unwrap(),
+        storage.get_for_test(b"00").unwrap(),
         Some(Bytes::from_static(b"2333"))
     );
     assert_eq!(
-        storage.get(b"2").unwrap(),
+        storage.get_for_test(b"2").unwrap(),
         Some(Bytes::from_static(b"2333"))
     );
     assert_eq!(
-        storage.get(b"3").unwrap(),
+        storage.get_for_test(b"3").unwrap(),
         Some(Bytes::from_static(b"23333"))
     );
-    assert_eq!(storage.get(b"4").unwrap(), None);
-    assert_eq!(storage.get(b"--").unwrap(), None);
-    assert_eq!(storage.get(b"555").unwrap(), None);
+    assert_eq!(storage.get_for_test(b"4").unwrap(), None);
+    assert_eq!(storage.get_for_test(b"--").unwrap(), None);
+    assert_eq!(storage.get_for_test(b"555").unwrap(), None);
 }

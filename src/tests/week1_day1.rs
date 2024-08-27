@@ -56,15 +56,15 @@ fn test_task2_storage_integration() {
     let storage = Arc::new(
         LsmStorageInner::open(dir.path(), LsmStorageOptions::default_for_week1_test()).unwrap(),
     );
-    assert_eq!(&storage.get(b"0").unwrap(), &None);
+    assert_eq!(&storage.get_for_test(b"0").unwrap(), &None);
     storage.put(b"1", b"233").unwrap();
     storage.put(b"2", b"2333").unwrap();
     storage.put(b"3", b"23333").unwrap();
-    assert_eq!(&storage.get(b"1").unwrap().unwrap()[..], b"233");
-    assert_eq!(&storage.get(b"2").unwrap().unwrap()[..], b"2333");
-    assert_eq!(&storage.get(b"3").unwrap().unwrap()[..], b"23333");
+    assert_eq!(&storage.get_for_test(b"1").unwrap().unwrap()[..], b"233");
+    assert_eq!(&storage.get_for_test(b"2").unwrap().unwrap()[..], b"2333");
+    assert_eq!(&storage.get_for_test(b"3").unwrap().unwrap()[..], b"23333");
     storage.delete(b"2").unwrap();
-    assert!(storage.get(b"2").unwrap().is_none());
+    assert!(storage.get_for_test(b"2").unwrap().is_none());
     storage.delete(b"0").unwrap(); // should NOT report any error
 }
 
@@ -124,7 +124,7 @@ fn test_task4_storage_integration() {
     let storage = Arc::new(
         LsmStorageInner::open(dir.path(), LsmStorageOptions::default_for_week1_test()).unwrap(),
     );
-    assert_eq!(&storage.get(b"0").unwrap(), &None);
+    assert_eq!(&storage.get_for_test(b"0").unwrap(), &None);
     storage.put(b"1", b"233").unwrap();
     storage.put(b"2", b"2333").unwrap();
     storage.put(b"3", b"23333").unwrap();
@@ -141,8 +141,8 @@ fn test_task4_storage_integration() {
     storage.put(b"1", b"233333").unwrap();
     storage.put(b"3", b"233333").unwrap();
     assert_eq!(storage.state.read().imm_memtables.len(), 2);
-    assert_eq!(&storage.get(b"1").unwrap().unwrap()[..], b"233333");
-    assert_eq!(&storage.get(b"2").unwrap(), &None);
-    assert_eq!(&storage.get(b"3").unwrap().unwrap()[..], b"233333");
-    assert_eq!(&storage.get(b"4").unwrap().unwrap()[..], b"23333");
+    assert_eq!(&storage.get_for_test(b"1").unwrap().unwrap()[..], b"233333");
+    assert_eq!(&storage.get_for_test(b"2").unwrap(), &None);
+    assert_eq!(&storage.get_for_test(b"3").unwrap().unwrap()[..], b"233333");
+    assert_eq!(&storage.get_for_test(b"4").unwrap().unwrap()[..], b"23333");
 }

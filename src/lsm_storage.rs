@@ -296,7 +296,8 @@ impl MiniLsm {
     }
 
     pub fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
-        self.inner.get(key)
+        let txn = self.new_txn()?;
+        txn.get(key)
     }
 
     pub fn put(&self, key: &[u8], value: &[u8]) -> Result<()> {
@@ -311,12 +312,9 @@ impl MiniLsm {
         self.inner.sync()
     }
 
-    pub fn scan(
-        &self,
-        lower: Bound<&[u8]>,
-        upper: Bound<&[u8]>,
-    ) -> Result<FusedIterator<LsmIterator>> {
-        self.inner.scan_with_ts(lower, upper, TS_RANGE_BEGIN)
+    pub fn scan(&self, lower: Bound<&[u8]>, upper: Bound<&[u8]>) -> Result<TxnIterator> {
+        let txn = self.new_txn()?;
+        txn.scan(lower, upper)
     }
 
     /// Only call this in test cases due to race conditions
@@ -514,12 +512,11 @@ impl LsmStorageInner {
 
     /// Get a key from the storage. In day 7, this can be further optimized by using a bloom filter.
     /// Memtable -> Immutable Memtable -> L0 SsTable -> L1 SsTable
-    pub fn get(self: &Arc<Self>, key: &[u8]) -> Result<Option<Bytes>> {
-        let txn = self.mvcc.as_ref().unwrap().new_txn(self.clone(), false);
-        txn.get(key)
+    pub fn get_for_test(self: &Arc<Self>, key: &[u8]) -> Result<Option<Bytes>> {
+        self.get(key, TS_RANGE_BEGIN)
     }
 
-    pub fn get_with_ts(&self, key: &[u8], read_ts: u64) -> Result<Option<Bytes>> {
+    pub fn get(&self, key: &[u8], read_ts: u64) -> Result<Option<Bytes>> {
         let state = {
             let gaurd = self.state.read();
             Arc::clone(&gaurd)
@@ -577,40 +574,40 @@ impl LsmStorageInner {
         let mvcc = self.mvcc.as_ref().unwrap();
         let _mvcc_lock = mvcc.write_lock.lock();
         let commit_ts = mvcc.latest_commit_ts() + 1;
-        for record in batch {
-            let should_freeze = {
-                let state = self.state.read();
-                match record {
-                    WriteBatchRecord::Del(key) => {
-                        state
-                            .memtable
-                            .put(KeySlice::from_slice(key.as_ref(), commit_ts), b"")?;
-                    }
-                    WriteBatchRecord::Put(key, value) => {
-                        state.memtable.put(
-                            KeySlice::from_slice(key.as_ref(), commit_ts),
-                            value.as_ref(),
-                        )?;
-                    }
+
+        let records = batch
+            .iter()
+            .map(|record| match record {
+                WriteBatchRecord::Del(key) => {
+                    (KeySlice::from_slice(key.as_ref(), commit_ts), b"" as &[u8])
                 }
-                state
-                    .memtable
-                    .approximate_size()
-                    .gt(&self.options.target_sst_size)
-            };
-            if should_freeze {
-                let state_lock = self.state_lock.lock();
-                if self
-                    .state
-                    .read()
-                    .memtable
-                    .approximate_size()
-                    .gt(&self.options.target_sst_size)
-                {
-                    self.force_freeze_memtable(&state_lock)?;
-                }
+                WriteBatchRecord::Put(key, value) => (
+                    KeySlice::from_slice(key.as_ref(), commit_ts),
+                    value.as_ref(),
+                ),
+            })
+            .collect::<Vec<_>>();
+        let should_freeze = {
+            let state = self.state.read();
+            state.memtable.put_batch(&records)?;
+            state
+                .memtable
+                .approximate_size()
+                .gt(&self.options.target_sst_size)
+        };
+        if should_freeze {
+            let state_lock = self.state_lock.lock();
+            if self
+                .state
+                .read()
+                .memtable
+                .approximate_size()
+                .gt(&self.options.target_sst_size)
+            {
+                self.force_freeze_memtable(&state_lock)?;
             }
         }
+
         mvcc.update_commit_ts(commit_ts);
         Ok(())
     }
@@ -729,16 +726,23 @@ impl LsmStorageInner {
     }
 
     pub fn new_txn(self: &Arc<Self>) -> Result<Arc<Transaction>> {
-        Ok(self.mvcc.as_ref().unwrap().new_txn(self.clone(), false))
+        Ok(self
+            .mvcc
+            .as_ref()
+            .unwrap()
+            .new_txn(self.clone(), self.options.serializable))
     }
 
     /// Create an iterator over a range of keys.
-    pub fn scan(self: &Arc<Self>, lower: Bound<&[u8]>, upper: Bound<&[u8]>) -> Result<TxnIterator> {
-        let txn = self.mvcc.as_ref().unwrap().new_txn(self.clone(), false);
-        txn.scan(lower, upper)
+    pub fn scan_for_test(
+        self: &Arc<Self>,
+        lower: Bound<&[u8]>,
+        upper: Bound<&[u8]>,
+    ) -> Result<FusedIterator<LsmIterator>> {
+        self.scan(lower, upper, TS_RANGE_BEGIN)
     }
 
-    pub fn scan_with_ts(
+    pub fn scan(
         &self,
         lower: Bound<&[u8]>,
         upper: Bound<&[u8]>,

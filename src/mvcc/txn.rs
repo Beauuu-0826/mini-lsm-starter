@@ -49,7 +49,7 @@ impl Transaction {
                 return Ok(Some(entry.value().clone()));
             }
         }
-        self.inner.get_with_ts(key, self.read_ts)
+        self.inner.get(key, self.read_ts)
     }
 
     pub fn scan(self: &Arc<Self>, lower: Bound<&[u8]>, upper: Bound<&[u8]>) -> Result<TxnIterator> {
@@ -64,7 +64,7 @@ impl Transaction {
         }
         .build();
         local_iterator.next()?;
-        let storage_iterator = self.inner.scan_with_ts(lower, upper, self.read_ts)?;
+        let storage_iterator = self.inner.scan(lower, upper, self.read_ts)?;
         Ok(TxnIterator {
             _txn: self.clone(),
             iter: TwoMergeIterator::create(local_iterator, storage_iterator)?,

@@ -17,7 +17,7 @@ use crate::iterators::merge_iterator::MergeIterator;
 use crate::iterators::two_merge_iterator::TwoMergeIterator;
 use crate::iterators::StorageIterator;
 use crate::key::KeySlice;
-use crate::lsm_storage::{LsmStorageInner, LsmStorageState};
+use crate::lsm_storage::{CompactionFilter, LsmStorageInner, LsmStorageState};
 use crate::manifest::ManifestRecord;
 use crate::table::{SsTable, SsTableBuilder};
 
@@ -186,10 +186,11 @@ impl LsmStorageInner {
     {
         let watermark = self.mvcc.as_ref().unwrap().watermark();
         let mut prev_ley_under_watermark = Vec::new();
+        let compaction_filters = self.compaction_filters.lock();
         // consume the iterator adds key-value to sst_builder
         let mut sst_builder = Some(SsTableBuilder::new(self.options.block_size));
         let mut sorted_run = Vec::new();
-        while iterator.is_valid() {
+        'iter: while iterator.is_valid() {
             if iterator.key().ts() <= watermark {
                 if iterator.key().key_ref() == prev_ley_under_watermark {
                     iterator.next()?;
@@ -201,6 +202,13 @@ impl LsmStorageInner {
                 if ignore_deleted && iterator.value().is_empty() {
                     iterator.next()?;
                     continue;
+                }
+                for filter in compaction_filters.iter() {
+                    let CompactionFilter::Prefix(prefix) = filter;
+                    if iterator.key().key_ref().starts_with(prefix) {
+                        iterator.next()?;
+                        continue 'iter;
+                    }
                 }
             }
 

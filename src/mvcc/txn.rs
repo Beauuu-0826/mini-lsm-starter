@@ -16,13 +16,19 @@ use crate::{
     lsm_storage::{LsmStorageInner, WriteBatchRecord},
 };
 
+pub(crate) type RwSet = (
+    HashSet<Bytes>,
+    HashSet<Bytes>,
+    HashSet<(Bound<Bytes>, Bound<Bytes>)>,
+);
+
 pub struct Transaction {
     pub(crate) read_ts: u64,
     pub(crate) inner: Arc<LsmStorageInner>,
     pub(crate) local_storage: Arc<SkipMap<Bytes, Bytes>>,
     pub(crate) committed: Arc<AtomicBool>,
     /// Write set and read set
-    pub(crate) key_hashes: Option<Mutex<(HashSet<u32>, HashSet<u32>)>>,
+    pub(crate) rw_set: Option<Mutex<RwSet>>,
 }
 
 fn map_bound(bound: Bound<&[u8]>) -> Bound<Bytes> {
@@ -38,8 +44,8 @@ impl Transaction {
         if self.committed.load(std::sync::atomic::Ordering::SeqCst) {
             bail!("This transaction has entered the commit phase");
         }
-        if let Some(ref guard) = self.key_hashes {
-            guard.lock().1.insert(farmhash::hash32(key));
+        if let Some(ref guard) = self.rw_set {
+            guard.lock().1.insert(Bytes::copy_from_slice(key));
         }
 
         if let Some(entry) = self.local_storage.get(key) {
@@ -55,6 +61,9 @@ impl Transaction {
     pub fn scan(self: &Arc<Self>, lower: Bound<&[u8]>, upper: Bound<&[u8]>) -> Result<TxnIterator> {
         if self.committed.load(std::sync::atomic::Ordering::SeqCst) {
             bail!("This transaction has entered the commit phase");
+        }
+        if let Some(ref guard) = self.rw_set {
+            guard.lock().2.insert((map_bound(lower), map_bound(upper)));
         }
 
         let mut local_iterator = TxnLocalIteratorBuilder {
@@ -75,8 +84,8 @@ impl Transaction {
         if self.committed.load(std::sync::atomic::Ordering::SeqCst) {
             panic!("This transaction has entered the commit phase");
         }
-        if let Some(ref guard) = self.key_hashes {
-            guard.lock().0.insert(farmhash::hash32(key));
+        if let Some(ref guard) = self.rw_set {
+            guard.lock().0.insert(Bytes::copy_from_slice(key));
         }
 
         self.local_storage
@@ -100,7 +109,7 @@ impl Transaction {
         // To ensure that only one transaction can enter into commit phase at a time
         let mvcc = self.inner.mvcc.as_ref().unwrap();
         let _commit_lock = mvcc.commit_lock.lock();
-        if let Some(ref guard) = self.key_hashes {
+        if let Some(ref guard) = self.rw_set {
             if !mvcc.serializable(self.read_ts, mvcc.latest_commit_ts() + 1, &guard.lock()) {
                 bail!("This transaction may embrace the serializable isolation, can't commit");
             }
@@ -119,7 +128,7 @@ impl Transaction {
             .collect::<Vec<_>>();
         self.inner.write_batch(&batch_record)?;
 
-        if let Some(ref guard) = self.key_hashes {
+        if let Some(ref guard) = self.rw_set {
             mvcc.maintain_commited_txn(
                 mvcc.latest_commit_ts(),
                 self.read_ts,
